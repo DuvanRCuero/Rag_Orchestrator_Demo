@@ -1,0 +1,49 @@
+{
+  "name": "LangChain Production QA Evaluation",
+  "version": "1.0",
+  "description": "QA pairs for evaluating RAG system on LangChain production topics",
+  "questions": [
+    {
+      "id": "LC-001",
+      "question": "What are the key differences between Qdrant and ChromaDB for production use?",
+      "context": ["langchain_production.md"],
+      "expected_answer": "Qdrant is recommended for production due to better scalability and performance, while ChromaDB has limitations for production deployments.",
+      "difficulty": "medium"
+    },
+    {
+      "id": "LC-002",
+      "question": "What three-tier caching strategy should be implemented?",
+      "context": ["langchain_production.md"],
+      "expected_answer": "1. Embedding cache (Redis, TTL: 7 days), 2. Query result cache (Redis, TTL: 1 hour), 3. Session cache (in-memory, TTL: 30 minutes)",
+      "difficulty": "easy"
+    },
+    {
+      "id": "LC-003",
+      "question": "What are the four hallucination mitigation techniques mentioned?",
+      "context": ["rag_best_practices.md"],
+      "expected_answer": "1. Multi-Query Retrieval, 2. Chain-of-Verification, 3. Self-Reflection, 4. Confidence Scoring",
+      "difficulty": "medium"
+    },
+    {
+      "id": "LC-004",
+      "question": "What latency targets should be set for P95 retrieval and generation?",
+      "context": ["monitoring_scaling.md"],
+      "expected_answer": "P95 retrieval: < 500ms, P95 generation: < 3s",
+      "difficulty": "easy"
+    },
+    {
+      "id": "LC-005",
+      "question": "What are the critical alert thresholds for error rate and latency?",
+      "context": ["monitoring_scaling.md"],
+      "expected_answer": "Error rate > 5%, P95 latency > 5s",
+      "difficulty": "medium"
+    },
+    {
+      "id": "LC-006",
+      "question": "What embedding models provide the best quality vs speed balance?",
+      "context": ["langchain_production.md", "rag_best_practices.md"],
+      "expected_answer": "all-mpnet-base-v2 for highest quality, all-MiniLM-L6-v2 for speed/quality balance",
+      "difficulty": "hard"
+    }
+  ]
+}

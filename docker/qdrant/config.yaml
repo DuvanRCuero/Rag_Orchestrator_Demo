@@ -1,0 +1,64 @@
+log_level: INFO
+
+service:
+  host: 0.0.0.0
+  http_port: 6333
+  grpc_port: 6334
+
+storage:
+  # Storage path for Qdrant data
+  storage_path: /qdrant/storage
+
+  # Use in-memory storage for faster operations (optional)
+  # storage_path: ":memory:"
+
+  # Optimizer configuration
+  optimizer_config:
+    # The minimal fraction of deleted vectors in a segment, required to perform segment optimization
+    deleted_threshold: 0.2
+    # The minimal number of vectors in a segment, required to perform segment optimization
+    vacuum_min_vector_number: 1000
+    # Target amount of segments optimizer will try to keep.
+    # Real amount of segments may vary depending on multiple parameters:
+    #  - Amount of stored points
+    #  - Current write RPS
+    # It is recommended to select default number of segments as a factor of the number of search threads,
+    # so that each segment would be handled evenly by one of the threads.
+    default_segment_number: 2
+    # Do not create segments larger than this size (in KiloBytes).
+    # Large segments might require disproportionately long indexation times,
+    # therefore it makes sense to limit the size of segments.
+    # If indexation speed is more important - make this parameter lower.
+    # If search speed is more important - make this parameter higher.
+    # Note: 1Kb = 1 vector of size 256
+    max_segment_size: 50000
+    # Maximum size (in KiloBytes) of vectors to store in-memory per segment.
+    # Segments larger than this threshold will be stored as read-only memmapped files.
+    memmap_threshold: 20000
+    # Maximum size (in KiloBytes) of vectors allowed for plain index.
+    # Default value based on https://github.com/google-research/google-research/blob/master/scann/docs/algorithms.md
+    indexing_threshold: 10000
+    # Minimum interval between forced flushes.
+    flush_interval_sec: 5
+    # Maximum available threads for optimization workers
+    max_optimization_threads: 4
+
+cluster:
+  enabled: false
+
+  # Configuration for distributed deployment (optional)
+  # p2p:
+  #   port: 6335
+  #   connection_pool_size: 10
+
+# Performance settings
+performance:
+  max_search_threads: 4
+  max_optimization_threads: 2
+
+  # Search performance
+  search_queue_size: 100
+  update_queue_size: 100
+
+# Telemetry (optional)
+telemetry_disabled: false

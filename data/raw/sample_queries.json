@@ -1,0 +1,44 @@
+{
+  "test_queries": [
+    {
+      "query": "What vector database should I use for production?",
+      "expected_keywords": ["Qdrant", "Pinecone", "scalability", "production"],
+      "category": "architecture"
+    },
+    {
+      "query": "How do I reduce hallucinations in RAG systems?",
+      "expected_keywords": ["verification", "self-reflection", "multi-query", "confidence"],
+      "category": "quality"
+    },
+    {
+      "query": "What are optimal chunk sizes for technical documentation?",
+      "expected_keywords": ["800-1200", "overlap", "tokens", "chunking"],
+      "category": "performance"
+    },
+    {
+      "query": "How should I cache embeddings?",
+      "expected_keywords": ["Redis", "TTL", "cache", "layers", "performance"],
+      "category": "optimization"
+    },
+    {
+      "query": "What metrics should I monitor in production?",
+      "expected_keywords": ["latency", "error rate", "token usage", "cache hit rate"],
+      "category": "monitoring"
+    },
+    {
+      "query": "How do I scale a RAG system horizontally?",
+      "expected_keywords": ["load balancer", "instances", "Redis cluster", "connection pooling"],
+      "category": "scaling"
+    },
+    {
+      "query": "What security measures should I implement?",
+      "expected_keywords": ["rate limiting", "API keys", "PII filtering", "encryption"],
+      "category": "security"
+    },
+    {
+      "query": "How can I reduce API costs?",
+      "expected_keywords": ["caching", "deduplication", "cheaper models", "token counting"],
+      "category": "cost"
+    }
+  ]
+}

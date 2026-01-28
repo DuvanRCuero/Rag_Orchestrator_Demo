@@ -1,0 +1,190 @@
+version: '3.8'
+
+services:
+  qdrant:
+    image: qdrant/qdrant:v1.11.0
+    container_name: rag-qdrant
+    restart: unless-stopped
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - ./docker/qdrant/config.yaml:/qdrant/config/production.yaml:ro
+      - qdrant_data:/qdrant/storage
+      - ./docker/qdrant/qdrant_logs:/qdrant/log
+    environment:
+      - QDRANT__SERVICE__GRPC_PORT=6334
+      - QDRANT__LOG_LEVEL=INFO
+    command: "./qdrant --config-path /qdrant/config/production.yaml"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - rag-network
+
+  # Redis for caching and session storage
+  redis:
+    image: redis:7.2-alpine
+    container_name: rag-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - ./docker/redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
+      - redis_data:/data
+      - redis_logs:/var/log/redis
+    command: redis-server /usr/local/etc/redis/redis.conf
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-changeme123}
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - rag-network
+
+  # FastAPI Application
+  api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.api
+    container_name: rag-api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./src:/app/src:ro
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./uploads:/app/uploads
+    environment:
+      - ENVIRONMENT=production
+      - DEBUG=False
+      - QDRANT_URL=http://qdrant:6333
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-changeme123}@redis:6379/0
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - EMBEDDING_MODEL=${EMBEDDING_MODEL:-sentence-transformers/all-MiniLM-L6-v2}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4-1106-preview}
+      - CHUNK_SIZE=${CHUNK_SIZE:-1000}
+      - CHUNK_OVERLAP=${CHUNK_OVERLAP:-200}
+    depends_on:
+      qdrant:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - rag-network
+
+  # Nginx Reverse Proxy (optional)
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: rag-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./docker/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./docker/nginx/ssl:/etc/nginx/ssl:ro
+      - nginx_logs:/var/log/nginx
+    depends_on:
+      - api
+    networks:
+      - rag-network
+
+  # Monitoring with Prometheus and Grafana (optional)
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: rag-prometheus
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./docker/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+    networks:
+      - rag-network
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: rag-grafana
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./docker/monitoring/grafana/provisioning:/etc/grafana/provisioning
+      - ./docker/monitoring/grafana/dashboards:/var/lib/grafana/dashboards
+    depends_on:
+      - prometheus
+    networks:
+      - rag-network
+
+  # pgAdmin for database management (optional)
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: rag-pgadmin
+    restart: unless-stopped
+    ports:
+      - "5050:80"
+    environment:
+      - PGADMIN_DEFAULT_EMAIL=${PGADMIN_EMAIL:-admin@admin.com}
+      - PGADMIN_DEFAULT_PASSWORD=${PGADMIN_PASSWORD:-admin}
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    networks:
+      - rag-network
+
+  # Redis Commander for Redis management (optional)
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: rag-redis-commander
+    restart: unless-stopped
+    ports:
+      - "8081:8081"
+    environment:
+      - REDIS_HOSTS=local:redis:6379
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-changeme123}
+    depends_on:
+      - redis
+    networks:
+      - rag-network
+
+volumes:
+  qdrant_data:
+    driver: local
+  redis_data:
+    driver: local
+  redis_logs:
+    driver: local
+  nginx_logs:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local
+  pgadmin_data:
+    driver: local
+
+networks:
+  rag-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

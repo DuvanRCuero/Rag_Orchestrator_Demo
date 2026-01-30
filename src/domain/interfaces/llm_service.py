@@ -21,8 +21,3 @@ class LLMService(ABC):
     @abstractmethod
     async def get_token_usage(self, text: str) -> Dict[str, int]:
         pass
-
-    @property
-    @abstractmethod
-    def langchain_llm(self):
-        pass

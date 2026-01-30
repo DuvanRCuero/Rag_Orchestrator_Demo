@@ -6,11 +6,6 @@ from typing import List
 
 class EmbeddingServiceInterface(ABC):
 
-    @property
-    @abstractmethod
-    def dimension(self) -> int:
-        pass
-
     @abstractmethod
     async def embed_texts(self, texts: List[str]) -> List[List[float]]:
         pass

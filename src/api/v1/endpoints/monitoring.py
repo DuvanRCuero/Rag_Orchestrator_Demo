@@ -189,3 +189,17 @@ async def get_configuration():
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to get configuration: {str(e)}",
         )
+
+
+@router.get(
+    "/providers",
+    summary="List available LLM providers",
+    description="List all registered LLM providers and the current active provider.",
+)
+async def list_providers():
+    """List available LLM providers."""
+    from src.infrastructure.llm import LLMFactory
+    return {
+        "available_providers": LLMFactory.available_providers(),
+        "current_provider": settings.LLM_PROVIDER,
+    }

@@ -31,6 +31,15 @@ class Settings(BaseSettings):
     OPENAI_TEMPERATURE: float = 0.1
     OPENAI_MAX_TOKENS: int = 1000
 
+    # Anthropic (optional)
+    ANTHROPIC_API_KEY: Optional[str] = None
+    ANTHROPIC_MODEL: str = "claude-3-sonnet-20240229"
+    ANTHROPIC_MAX_TOKENS: int = 1000
+
+    # Local LLM / Ollama (optional)
+    OLLAMA_BASE_URL: str = "http://localhost:11434"
+    LOCAL_MODEL: str = "llama2"
+
     # Text Processing
     CHUNK_SIZE: int = 1000
     CHUNK_OVERLAP: int = 200

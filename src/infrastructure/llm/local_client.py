@@ -93,7 +93,10 @@ class LocalLLMService(LLMService):
             )
 
     async def get_token_usage(self, text: str) -> Dict[str, int]:
-        estimated_tokens = len(text.split()) * 1.3
+        # Approximate token count
+        # Using 1.3 as average multiplier: accounts for tokens per word + punctuation
+        TOKEN_MULTIPLIER = 1.3
+        estimated_tokens = len(text.split()) * TOKEN_MULTIPLIER
         return {
             "estimated_tokens": int(estimated_tokens),
             "provider": "local",

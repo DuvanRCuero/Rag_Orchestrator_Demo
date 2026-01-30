@@ -47,12 +47,16 @@ class AnthropicService(LLMService):
         try:
             system, msgs = self._convert_messages(messages)
             
-            response = await self.client.messages.create(
-                model=self.model,
-                max_tokens=max_tokens or self.max_tokens,
-                system=system or "",
-                messages=msgs,
-            )
+            # Build parameters - only include system if present
+            params = {
+                "model": self.model,
+                "max_tokens": max_tokens or self.max_tokens,
+                "messages": msgs,
+            }
+            if system:
+                params["system"] = system
+            
+            response = await self.client.messages.create(**params)
             
             return response.content[0].text
             
@@ -86,12 +90,16 @@ class AnthropicService(LLMService):
         try:
             system, msgs = self._convert_messages(messages)
             
-            async with self.client.messages.stream(
-                model=self.model,
-                max_tokens=self.max_tokens,
-                system=system or "",
-                messages=msgs,
-            ) as stream:
+            # Build parameters - only include system if present
+            params = {
+                "model": self.model,
+                "max_tokens": self.max_tokens,
+                "messages": msgs,
+            }
+            if system:
+                params["system"] = system
+            
+            async with self.client.messages.stream(**params) as stream:
                 async for text in stream.text_stream:
                     yield text
                     
@@ -103,7 +111,9 @@ class AnthropicService(LLMService):
 
     async def get_token_usage(self, text: str) -> Dict[str, int]:
         # Approximate token count (Anthropic uses similar tokenization)
-        estimated_tokens = len(text.split()) * 1.3
+        # Using 1.3 as average multiplier: accounts for tokens per word + punctuation
+        TOKEN_MULTIPLIER = 1.3
+        estimated_tokens = len(text.split()) * TOKEN_MULTIPLIER
         return {
             "estimated_tokens": int(estimated_tokens),
             "provider": "anthropic",

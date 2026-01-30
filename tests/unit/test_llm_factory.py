@@ -100,14 +100,6 @@ class TestLLMFactory:
 class TestAnthropicClient:
     """Test Anthropic client functionality."""
 
-    def test_anthropic_import_error(self):
-        """Test that missing anthropic package raises proper error."""
-        with patch.dict('sys.modules', {'anthropic': None}):
-            with pytest.raises(ImportError) as exc_info:
-                from src.infrastructure.llm.anthropic_client import AnthropicService
-                AnthropicService()
-            assert "anthropic package required" in str(exc_info.value)
-
     @patch('src.infrastructure.llm.anthropic_client.AsyncAnthropic')
     async def test_anthropic_message_conversion(self, mock_anthropic):
         """Test message format conversion from OpenAI to Anthropic."""

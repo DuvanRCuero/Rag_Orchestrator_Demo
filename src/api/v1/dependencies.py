@@ -2,25 +2,28 @@ from typing import Any, Dict
 
 from fastapi import Depends, HTTPException, status
 
-from src.application.chains.memory import conversation_memory
-from src.application.chains.rag_chain import rag_chain
+from src.infrastructure.container import container
 from src.core.config import settings
-from src.infrastructure.vector.qdrant_client import QdrantVectorStore
 
 
 def get_rag_chain():
     """Dependency to get RAG chain instance."""
-    return rag_chain
+    return container.rag_chain
 
 
 def get_vector_store():
     """Dependency to get vector store instance."""
-    return QdrantVectorStore()
+    return container.vector_store
+
+
+def get_embedding_service():
+    """Dependency to get embedding service."""
+    return container.embedding_service
 
 
 def get_conversation_memory():
     """Dependency to get conversation memory."""
-    return conversation_memory
+    return container.conversation_memory
 
 
 def validate_api_key(api_key: str = None):

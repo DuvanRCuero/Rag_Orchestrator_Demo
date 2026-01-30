@@ -17,6 +17,7 @@ from src.core.config import settings
 from src.core.exceptions import RetrievalError
 from src.core.schemas import DocumentChunk
 from src.domain.vector_store import VectorStore
+from src.domain.retrieval.bm25_scorer import BM25Scorer, BM25Result
 
 
 class QdrantVectorStore(VectorStore):
@@ -28,6 +29,9 @@ class QdrantVectorStore(VectorStore):
         self._initialized = False
         # For direct HTTP calls to v1.7.4
         self.http_url = "http://localhost:6333"
+        # BM25 support
+        self._bm25_scorer = BM25Scorer()
+        self._bm25_indexed = False
 
     @property
     def client(self):
@@ -139,6 +143,9 @@ class QdrantVectorStore(VectorStore):
                     points=batch,
                     wait=True
                 )
+            
+            # Invalidate BM25 index when documents change
+            self._bm25_indexed = False
             return True
         except Exception as e:
             print(f"Error upserting chunks: {e}")
@@ -233,6 +240,37 @@ class QdrantVectorStore(VectorStore):
                 },
             )
 
+    async def _ensure_bm25_index(self) -> None:
+        """Build BM25 index from all documents in collection."""
+        if self._bm25_indexed:
+            return
+
+        try:
+            response = requests.post(
+                f"{self.http_url}/collections/{self.collection_name}/points/scroll",
+                json={"limit": 10000, "with_payload": True},
+                timeout=60
+            )
+            response.raise_for_status()
+
+            points = response.json().get("result", {}).get("points", [])
+            chunks = [
+                {
+                    'id': p['payload'].get('id', str(p['id'])),
+                    'content': p['payload'].get('content', ''),
+                    'metadata': p['payload'].get('metadata', {}),
+                    'document_id': p['payload'].get('document_id', ''),
+                    'chunk_index': p['payload'].get('chunk_index', 0),
+                }
+                for p in points
+            ]
+
+            self._bm25_scorer.index_documents(chunks)
+            self._bm25_indexed = True
+            print(f"✅ Built BM25 index with {len(chunks)} chunks")
+        except Exception as e:
+            print(f"Failed to build BM25 index: {e}")
+
     async def hybrid_search(
             self,
             query_embedding: List[float],
@@ -241,15 +279,61 @@ class QdrantVectorStore(VectorStore):
             score_threshold: float = 0.0,
             filters: Optional[Dict[str, Any]] = None,
     ) -> List[DocumentChunk]:
-        """Hybrid search - falls back to semantic for v1.7.4."""
-        print(f"Hybrid search requested, using semantic search for Qdrant v1.7.4")
+        """Hybrid search combining semantic and BM25 with Reciprocal Rank Fusion."""
+        await self._ensure_bm25_index()
 
-        return await self.search(
+        # Semantic search from Qdrant
+        semantic_results = await self.search(
             query_embedding=query_embedding,
-            top_k=top_k,
-            score_threshold=score_threshold,
+            top_k=top_k * 3,
+            score_threshold=0.0,
             filters=filters,
         )
+
+        # BM25 search
+        bm25_results = self._bm25_scorer.score(query_text, top_k=top_k * 3)
+
+        # Reciprocal Rank Fusion
+        return self._fuse_results(semantic_results, bm25_results, top_k)
+
+    def _fuse_results(
+        self,
+        semantic_results: List[DocumentChunk],
+        bm25_results: List[BM25Result],
+        top_k: int,
+        k: int = 60,
+    ) -> List[DocumentChunk]:
+        """Fuse semantic and BM25 results using Reciprocal Rank Fusion."""
+        scores: Dict[str, Dict] = {}
+
+        for rank, chunk in enumerate(semantic_results, 1):
+            scores[chunk.id] = {
+                'chunk': chunk,
+                'rrf': settings.SEMANTIC_WEIGHT / (k + rank),
+            }
+
+        for rank, result in enumerate(bm25_results, 1):
+            if result.chunk_id in scores:
+                scores[result.chunk_id]['rrf'] += settings.BM25_WEIGHT / (k + rank)
+            else:
+                chunk = DocumentChunk(
+                    id=result.chunk_id,
+                    content=result.content,
+                    document_id=result.metadata.get('document_id', ''),
+                    chunk_index=result.metadata.get('chunk_index', 0),
+                    metadata=result.metadata.get('metadata', {}),
+                )
+                scores[result.chunk_id] = {
+                    'chunk': chunk,
+                    'rrf': settings.BM25_WEIGHT / (k + rank),
+                }
+
+        sorted_results = sorted(scores.values(), key=lambda x: x['rrf'], reverse=True)
+
+        for item in sorted_results:
+            item['chunk'].metadata['fusion_score'] = item['rrf']
+
+        return [item['chunk'] for item in sorted_results[:top_k]]
 
     def _combine_results(self, bm25_results, semantic_results, bm25_weight: float, semantic_weight: float):
         """Combine and rerank results."""

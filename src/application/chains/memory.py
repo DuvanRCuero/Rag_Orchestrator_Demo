@@ -158,6 +158,3 @@ class EnhancedConversationMemory:
             updated_at=session.updated_at,
         )
 
-
-# Global memory instance
-conversation_memory = EnhancedConversationMemory()

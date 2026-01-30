@@ -7,7 +7,6 @@ from fastapi import APIRouter, HTTPException, status
 
 from src.api.v1.dependencies import get_vector_store
 from src.core.config import settings
-from src.infrastructure.vector.qdrant_client import QdrantVectorStore
 
 router = APIRouter()
 

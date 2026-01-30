@@ -412,3 +412,15 @@ class TestAPIEndpoints:
         # Streaming endpoint should return 200 for successful connection
         # or handle streaming differently
         assert response.status_code in [200, 400, 422]
+
+    def test_list_providers(self, test_client):
+        """Test list providers endpoint."""
+        response = test_client.get("/api/v1/monitoring/providers")
+        
+        assert response.status_code == 200
+        data = response.json()
+        assert "available_providers" in data
+        assert "current_provider" in data
+        assert isinstance(data["available_providers"], list)
+        assert "openai" in data["available_providers"]
+        assert data["current_provider"] == "openai"

@@ -11,13 +11,13 @@ class Container:
         return cls._instance
 
     def _init_services(self):
-        from src.infrastructure.llm.openai_client import AsyncOpenAIService
+        from src.infrastructure.llm import LLMFactory
         from src.infrastructure.vector.qdrant_client import QdrantVectorStore
         from src.domain.embeddings import EmbeddingService
         from src.application.chains.rag_chain import AdvancedRAGChain
         from src.application.chains.memory import EnhancedConversationMemory
 
-        self._llm = AsyncOpenAIService()
+        self._llm = LLMFactory.create()
         self._embeddings = EmbeddingService()
         self._vector_store = QdrantVectorStore()
         self._memory = EnhancedConversationMemory()

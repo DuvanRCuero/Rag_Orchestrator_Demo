@@ -18,3 +18,8 @@ sentence_transformers==5.2.2
 tiktoken==0.12.0
 uvicorn==0.40.0
 rank-bm25>=0.2.2
+
+# Optional LLM providers
+anthropic>=0.18.0  # For Anthropic Claude
+httpx>=0.25.0  # For local LLM (Ollama)
+langchain-anthropic>=0.1.0  # Optional for Anthropic LCEL

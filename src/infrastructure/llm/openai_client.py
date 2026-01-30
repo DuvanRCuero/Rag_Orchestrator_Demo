@@ -12,9 +12,10 @@ from openai import APIError, AsyncOpenAI, RateLimitError
 
 from src.core.config import settings
 from src.core.exceptions import GenerationError
+from src.domain.interfaces.llm_service import LLMService
 
 
-class AsyncOpenAIService:
+class AsyncOpenAIService(LLMService):
     """Async OpenAI service with retry, fallback, and streaming support."""
 
     def __init__(self):
@@ -184,6 +185,3 @@ class AsyncOpenAIService:
                 "completion_tokens": 0,
             }
 
-
-# Global LLM service instance
-llm_service = AsyncOpenAIService()

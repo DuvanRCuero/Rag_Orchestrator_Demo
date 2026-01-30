@@ -8,12 +8,10 @@ from fastapi import (APIRouter, BackgroundTasks, File, Form, HTTPException,
                      UploadFile, status)
 from pydantic import BaseModel
 
-from src.api.v1.dependencies import get_vector_store
+from src.api.v1.dependencies import get_vector_store, get_embedding_service
 from src.core.exceptions import IngestionError
 from src.core.schemas import DocumentType, IngestionRequest, IngestionResponse
 from src.domain.documents import AdvancedDocumentProcessor
-from src.domain.embeddings import EmbeddingService
-from src.infrastructure.vector.qdrant_client import QdrantVectorStore
 
 router = APIRouter()
 
@@ -67,7 +65,7 @@ async def upload_documents(
             try:
                 # Process document
                 processor = AdvancedDocumentProcessor()
-                embedding_service = EmbeddingService()
+                embedding_service = get_embedding_service()
                 vector_store = get_vector_store()
 
                 # Load document

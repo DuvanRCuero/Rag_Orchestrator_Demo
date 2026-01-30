@@ -9,7 +9,6 @@ from typing import Any, Dict, List, Optional, Tuple
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnableLambda, RunnablePassthrough
 
-from src.application.chains.memory import conversation_memory
 from src.application.chains.prompts import (CONFIDENCE_PROMPT, HYDE_PROMPT,
                                             MULTI_QUERY_PROMPT, RAG_PROMPT,
                                             SELF_REFLECTION_PROMPT,
@@ -17,9 +16,7 @@ from src.application.chains.prompts import (CONFIDENCE_PROMPT, HYDE_PROMPT,
 from src.core.config import settings
 from src.core.exceptions import GenerationError, RetrievalError
 from src.core.schemas import DocumentChunk, QueryRequest, QueryResponse
-from src.domain.embeddings import EmbeddingService
-from src.infrastructure.llm.openai_client import llm_service
-from src.infrastructure.vector.qdrant_client import QdrantVectorStore
+from src.domain.interfaces import LLMService, EmbeddingServiceInterface, VectorStore
 
 
 @dataclass
@@ -49,10 +46,17 @@ class GenerationResult:
 class AdvancedRAGChain:
     """Production-grade RAG chain with multiple hallucination mitigation techniques."""
 
-    def __init__(self):
-        self.embedding_service = EmbeddingService()
-        self.vector_store = QdrantVectorStore()
+    def __init__(
+        self,
+        vector_store: VectorStore,
+        embedding_service: EmbeddingServiceInterface,
+        llm_service: LLMService,
+        conversation_memory=None,
+    ):
+        self.vector_store = vector_store
+        self.embedding_service = embedding_service
         self.llm_service = llm_service
+        self.conversation_memory = conversation_memory
 
         # Initialize chains
         self._setup_lcel_chains()
@@ -236,8 +240,8 @@ class AdvancedRAGChain:
 
         # Get conversation history
         history = ""
-        if session_id:
-            history = conversation_memory.get_conversation_for_context(session_id)
+        if session_id and self.conversation_memory:
+            history = self.conversation_memory.get_conversation_for_context(session_id)
 
         # Format context
         context = self._format_context(context_chunks)
@@ -286,9 +290,9 @@ class AdvancedRAGChain:
         generation_time = time.time() - start_time
 
         # Store in memory if session exists
-        if session_id:
-            conversation_memory.add_message(session_id, "user", query)
-            conversation_memory.add_message(session_id, "assistant", final_answer)
+        if session_id and self.conversation_memory:
+            self.conversation_memory.add_message(session_id, "user", query)
+            self.conversation_memory.add_message(session_id, "assistant", final_answer)
 
         return GenerationResult(
             answer=final_answer,
@@ -532,8 +536,8 @@ Generate a corrected answer:"""
 
         # Get history
         history = ""
-        if session_id:
-            history = conversation_memory.get_conversation_for_context(session_id)
+        if session_id and self.conversation_memory:
+            history = self.conversation_memory.get_conversation_for_context(session_id)
 
         # Prepare messages for streaming - use the string template directly
         system_content = PromptRegistry.SYSTEM_PROMPT_RAG.format(
@@ -549,6 +553,3 @@ Generate a corrected answer:"""
         async for token in self.llm_service.stream_generation(messages):
             yield token
 
-
-# Global RAG chain instance
-rag_chain = AdvancedRAGChain()

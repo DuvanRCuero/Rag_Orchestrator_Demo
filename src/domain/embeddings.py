@@ -8,9 +8,10 @@ from sentence_transformers import SentenceTransformer
 
 from src.core.config import settings
 from src.core.exceptions import IngestionError
+from src.domain.interfaces.embedding_service import EmbeddingServiceInterface
 
 
-class EmbeddingService:
+class EmbeddingService(EmbeddingServiceInterface):
     """Production-grade embedding service with caching, batching, and fallback."""
 
     def __init__(self):

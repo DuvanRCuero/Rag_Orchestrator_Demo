@@ -69,6 +69,9 @@ def create_application() -> FastAPI:
         allow_headers=["*"],
     )
 
+    # Add logging middleware
+    app.add_middleware(LoggingMiddleware)
+
     # Add exception handlers
     app.add_exception_handler(RAGException, global_exception_handler)
     app.add_exception_handler(HTTPException, global_exception_handler)

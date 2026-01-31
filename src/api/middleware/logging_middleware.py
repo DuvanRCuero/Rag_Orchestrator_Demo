@@ -7,34 +7,31 @@ from typing import Callable
 from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from src.core.logging import get_logger, bind_request_context, clear_request_context
+from src.core.logging import get_logger, bind_context, clear_context
 
 logger = get_logger(__name__)
 
 
 class LoggingMiddleware(BaseHTTPMiddleware):
-    """Middleware for structured request logging."""
 
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
+        # Generate request ID
         request_id = str(uuid.uuid4())[:8]
-        start_time = time.time()
-
-        # Bind context for all logs during this request
-        bind_request_context(
+        
+        # Bind context for all logs in this request
+        bind_context(
             request_id=request_id,
             method=request.method,
             path=request.url.path,
         )
-
-        # Add request ID to request state
-        request.state.request_id = request_id
-
+        
+        start_time = time.time()
+        
         logger.info(
             "request_started",
-            query_params=str(request.query_params),
-            client_host=request.client.host if request.client else None,
+            client=request.client.host if request.client else "unknown",
         )
-
+        
         try:
             response = await call_next(request)
             
@@ -45,13 +42,13 @@ class LoggingMiddleware(BaseHTTPMiddleware):
                 status_code=response.status_code,
                 duration_ms=round(duration_ms, 2),
             )
-
+            
             # Add headers
             response.headers["X-Request-ID"] = request_id
             response.headers["X-Process-Time"] = f"{duration_ms:.2f}"
-
+            
             return response
-
+            
         except Exception as e:
             duration_ms = (time.time() - start_time) * 1000
             
@@ -60,9 +57,8 @@ class LoggingMiddleware(BaseHTTPMiddleware):
                 error=str(e),
                 error_type=type(e).__name__,
                 duration_ms=round(duration_ms, 2),
-                exc_info=True,
             )
             raise
-
+            
         finally:
-            clear_request_context()
+            clear_context()

@@ -9,6 +9,7 @@ from fastapi import (APIRouter, BackgroundTasks, File, Form, HTTPException,
 from pydantic import BaseModel
 
 from src.api.v1.dependencies import get_vector_store, get_embedding_service
+from src.api.decorators import handle_exceptions
 from src.core.exceptions import IngestionError
 from src.core.schemas import DocumentType, IngestionRequest, IngestionResponse
 from src.domain.documents import AdvancedDocumentProcessor
@@ -32,6 +33,7 @@ class DocumentUpload(BaseModel):
     summary="Upload and process documents",
     description="Upload documents, split into chunks, generate embeddings, and store in vector database.",
 )
+@handle_exceptions("Document ingestion")
 async def upload_documents(
     background_tasks: BackgroundTasks,
     files: List[UploadFile] = File(...),
@@ -41,95 +43,88 @@ async def upload_documents(
     metadata: Optional[str] = Form(None),
 ):
     """Upload multiple documents for processing."""
-    try:
-        # Parse metadata if provided
-        metadata_dict = {}
-        if metadata:
-            import json
+    # Parse metadata if provided
+    metadata_dict = {}
+    if metadata:
+        import json
 
-            metadata_dict = json.loads(metadata)
+        metadata_dict = json.loads(metadata)
 
-        # Process files
-        document_ids = []
-        total_chunks = 0
+    # Process files
+    document_ids = []
+    total_chunks = 0
 
-        for upload_file in files:
-            # Create temporary file
-            with tempfile.NamedTemporaryFile(
-                delete=False, suffix=upload_file.filename
-            ) as tmp_file:
-                content = await upload_file.read()
-                tmp_file.write(content)
-                tmp_path = tmp_file.name
+    for upload_file in files:
+        # Create temporary file
+        with tempfile.NamedTemporaryFile(
+            delete=False, suffix=upload_file.filename
+        ) as tmp_file:
+            content = await upload_file.read()
+            tmp_file.write(content)
+            tmp_path = tmp_file.name
 
-            try:
-                # Process document
-                processor = AdvancedDocumentProcessor()
-                embedding_service = get_embedding_service()
-                vector_store = get_vector_store()
+        try:
+            # Process document
+            processor = AdvancedDocumentProcessor()
+            embedding_service = get_embedding_service()
+            vector_store = get_vector_store()
 
-                # Load document
-                raw_docs = processor.load_document(tmp_path, document_type)
+            # Load document
+            raw_docs = processor.load_document(tmp_path, document_type)
 
-                for doc_idx, raw_doc in enumerate(raw_docs):
-                    doc_metadata = {
-                        **metadata_dict,
-                        **raw_doc["metadata"],
-                        "filename": upload_file.filename,
-                        "document_type": document_type.value,
-                        "source": raw_doc["source"],
-                    }
+            for doc_idx, raw_doc in enumerate(raw_docs):
+                doc_metadata = {
+                    **metadata_dict,
+                    **raw_doc["metadata"],
+                    "filename": upload_file.filename,
+                    "document_type": document_type.value,
+                    "source": raw_doc["source"],
+                }
 
-                    # Create document ID
-                    import hashlib
+                # Create document ID
+                import hashlib
 
-                    doc_id = hashlib.md5(
-                        f"{upload_file.filename}_{doc_idx}".encode()
-                    ).hexdigest()[:16]
-                    doc_metadata["document_id"] = doc_id
+                doc_id = hashlib.md5(
+                    f"{upload_file.filename}_{doc_idx}".encode()
+                ).hexdigest()[:16]
+                doc_metadata["document_id"] = doc_id
 
-                    # Create chunks
-                    chunks = processor.create_intelligent_chunks(
-                        text=raw_doc["content"], metadata=doc_metadata
-                    )
-
-                    # Generate embeddings
-                    texts = [chunk.content for chunk in chunks]
-                    embeddings = await embedding_service.embed_texts(texts)
-
-                    # Add embeddings to chunks
-                    for chunk, embedding in zip(chunks, embeddings):
-                        chunk.embedding = embedding
-
-                    # Store in vector database
-                    await vector_store.upsert_chunks(chunks)
-
-                    document_ids.append(doc_id)
-                    total_chunks += len(chunks)
-
-                # Clean up temp file
-                os.unlink(tmp_path)
-
-            except Exception as e:
-                if os.path.exists(tmp_path):
-                    os.unlink(tmp_path)
-                raise IngestionError(
-                    detail=f"Failed to process {upload_file.filename}: {str(e)}",
-                    metadata={"filename": upload_file.filename},
+                # Create chunks
+                chunks = processor.create_intelligent_chunks(
+                    text=raw_doc["content"], metadata=doc_metadata
                 )
 
-        return IngestionResponse(
-            document_ids=document_ids,
-            total_chunks=total_chunks,
-            processing_time=0.0,  # Would track actual time
-            status="success",
-        )
+                # Generate embeddings
+                texts = [chunk.content for chunk in chunks]
+                embeddings = await embedding_service.embed_texts(texts)
 
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Document upload failed: {str(e)}",
-        )
+                # Add embeddings to chunks
+                for chunk, embedding in zip(chunks, embeddings):
+                    chunk.embedding = embedding
+
+                # Store in vector database
+                await vector_store.upsert_chunks(chunks)
+
+                document_ids.append(doc_id)
+                total_chunks += len(chunks)
+
+            # Clean up temp file
+            os.unlink(tmp_path)
+
+        except Exception as e:
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+            raise IngestionError(
+                detail=f"Failed to process {upload_file.filename}: {str(e)}",
+                metadata={"filename": upload_file.filename},
+            )
+
+    return IngestionResponse(
+        document_ids=document_ids,
+        total_chunks=total_chunks,
+        processing_time=0.0,  # Would track actual time
+        status="success",
+    )
 
 
 @router.post(
@@ -155,22 +150,17 @@ async def batch_ingest(request: IngestionRequest, background_tasks: BackgroundTa
     summary="Delete a document",
     description="Remove all chunks of a specific document from the vector store.",
 )
+@handle_exceptions("Document deletion")
 async def delete_document(document_id: str):
     """Delete a document and its chunks."""
-    try:
-        vector_store = get_vector_store()
-        await vector_store.delete_by_document_id(document_id)
+    vector_store = get_vector_store()
+    await vector_store.delete_by_document_id(document_id)
 
-        return {
-            "status": "success",
-            "message": f"Document {document_id} deleted successfully",
-            "document_id": document_id,
-        }
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Failed to delete document: {str(e)}",
-        )
+    return {
+        "status": "success",
+        "message": f"Document {document_id} deleted successfully",
+        "document_id": document_id,
+    }
 
 
 @router.get(
@@ -178,26 +168,21 @@ async def delete_document(document_id: str):
     summary="Get ingestion status",
     description="Get statistics about ingested documents and vector store.",
 )
+@handle_exceptions("Ingestion status retrieval")
 async def get_ingestion_status():
     """Get ingestion statistics."""
-    try:
-        vector_store = get_vector_store()
-        stats = await vector_store.get_collection_stats()
+    vector_store = get_vector_store()
+    stats = await vector_store.get_collection_stats()
 
-        return {
-            "status": "healthy",
-            "vector_store": {
-                "type": "qdrant",
-                "vectors_count": stats.get("vectors_count", 0),
-                "collection": stats.get("config", {}),
-            },
-            "documents": {
-                "total_documents": "unknown",  # Would track in metadata store
-                "total_chunks": stats.get("vectors_count", 0),
-            },
-        }
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Failed to get ingestion status: {str(e)}",
-        )
+    return {
+        "status": "healthy",
+        "vector_store": {
+            "type": "qdrant",
+            "vectors_count": stats.get("vectors_count", 0),
+            "collection": stats.get("config", {}),
+        },
+        "documents": {
+            "total_documents": "unknown",  # Would track in metadata store
+            "total_chunks": stats.get("vectors_count", 0),
+        },
+    }

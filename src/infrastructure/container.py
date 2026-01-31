@@ -1,5 +1,7 @@
 """Dependency injection container."""
 
+from src.core.config_models import AppConfig, get_config
+
 
 class Container:
     _instance = None
@@ -8,7 +10,20 @@ class Container:
         if cls._instance is None:
             cls._instance = super().__new__(cls)
             cls._instance._initialized = False
+            cls._instance._config = None
         return cls._instance
+
+    def __init__(self, config: AppConfig = None):
+        if not hasattr(self, '_config') or self._config is None:
+            self._config = config or get_config()
+
+    @classmethod
+    def with_config(cls, config: AppConfig) -> 'Container':
+        """Create container with custom config (for testing)."""
+        instance = cls.__new__(cls)
+        instance._initialized = False
+        instance._config = config
+        return instance
 
     def _init_services(self):
         from src.infrastructure.llm import LLMFactory
@@ -17,9 +32,12 @@ class Container:
         from src.application.chains.rag_chain import AdvancedRAGChain
         from src.application.chains.memory import EnhancedConversationMemory
 
-        self._llm = LLMFactory.create()
-        self._embeddings = EmbeddingService()
-        self._vector_store = QdrantVectorStore()
+        self._llm = LLMFactory.create(self._config.llm.provider, self._config.llm)
+        self._embeddings = EmbeddingService(self._config.embedding)
+        self._vector_store = QdrantVectorStore(
+            store_config=self._config.vector_store,
+            retrieval_config=self._config.retrieval,
+        )
         self._memory = EnhancedConversationMemory()
 
         self._rag_chain = AdvancedRAGChain(
@@ -33,6 +51,10 @@ class Container:
     def _ensure_initialized(self):
         if not self._initialized:
             self._init_services()
+
+    @property
+    def config(self) -> AppConfig:
+        return self._config
 
     @property
     def rag_chain(self):

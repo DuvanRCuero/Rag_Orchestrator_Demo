@@ -4,7 +4,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, AsyncIterator
 
-from src.domain.interfaces.llm_service import LLMService
+from src.domain.interfaces import LLMService
 from src.core.schemas import DocumentChunk
 from src.core.exceptions import GenerationError
 from src.application.chains.prompts import PromptRegistry

@@ -5,8 +5,7 @@ import hashlib
 from dataclasses import dataclass, field
 from typing import List, Optional
 
-from src.domain.interfaces.embedding_service import EmbeddingServiceInterface
-from src.domain.interfaces.vector_store import VectorStore
+from src.domain.interfaces import EmbeddingServiceInterface, VectorStore
 from src.core.config import settings
 from src.core.schemas import DocumentChunk
 

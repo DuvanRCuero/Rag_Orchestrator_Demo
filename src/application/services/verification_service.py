@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
-from src.domain.interfaces.llm_service import LLMService
+from src.domain.interfaces import LLMService
 from src.application.chains.prompts import PromptRegistry
 
 

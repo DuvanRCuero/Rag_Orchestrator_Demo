@@ -3,8 +3,7 @@
 import re
 from typing import List
 
-from src.domain.interfaces.llm_service import LLMService
-from src.domain.interfaces.embedding_service import EmbeddingServiceInterface
+from src.domain.interfaces import LLMService, EmbeddingServiceInterface
 from src.application.chains.prompts import PromptRegistry
 
 

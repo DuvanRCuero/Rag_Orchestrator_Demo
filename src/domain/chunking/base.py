@@ -55,5 +55,6 @@ class ChunkingStrategy(ABC):
                 **metadata,
                 "chunk_strategy": self.name,
                 "chunk_size": len(content),
+                "word_count": len(content.split()),
             },
         )

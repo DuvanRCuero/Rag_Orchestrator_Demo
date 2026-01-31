@@ -17,14 +17,14 @@ from src.core.config import settings
 from src.core.exceptions import RAGException
 from src.core.logging import setup_logging, get_logger
 
+# Initialize logging at module load
+setup_logging()
 logger = get_logger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan context manager for startup/shutdown events."""
-    # Setup logging first
-    setup_logging()
     
     # Startup
     logger.info(
@@ -57,6 +57,9 @@ def create_application() -> FastAPI:
         debug=settings.DEBUG,
     )
 
+    # Add logging middleware FIRST
+    app.add_middleware(LoggingMiddleware)
+
     # Configure CORS
     app.add_middleware(
         CORSMiddleware,
@@ -76,6 +79,12 @@ def create_application() -> FastAPI:
 
     # Include API routers
     app.include_router(api_router, prefix="/api/v1")
+
+    logger.info(
+        "application_created",
+        environment=settings.ENVIRONMENT,
+        debug=settings.DEBUG,
+    )
 
     # Custom OpenAPI schema
     def custom_openapi():
@@ -159,45 +168,6 @@ def create_application() -> FastAPI:
         )
 
     return app
-
-
-async def log_requests(request: Request, call_next):
-    """Middleware to log requests."""
-    request_id = str(uuid.uuid4())[:8]
-    start_time = time.time()
-
-    # Bind request context to logger
-    request_logger = logger.bind(
-        request_id=request_id,
-        method=request.method,
-        path=request.url.path,
-    )
-
-    request_logger.info("request_started")
-
-    try:
-        response = await call_next(request)
-        duration_ms = (time.time() - start_time) * 1000
-
-        request_logger.info(
-            "request_completed",
-            status_code=response.status_code,
-            duration_ms=round(duration_ms, 2),
-        )
-
-        response.headers["X-Request-ID"] = request_id
-        response.headers["X-Process-Time"] = str(round(duration_ms, 2))
-
-        return response
-
-    except Exception as e:
-        duration_ms = (time.time() - start_time) * 1000
-        request_logger.exception(
-            "request_failed",
-            duration_ms=round(duration_ms, 2),
-            error=str(e),
-        )
-        raise
 
 
 # Create application instance

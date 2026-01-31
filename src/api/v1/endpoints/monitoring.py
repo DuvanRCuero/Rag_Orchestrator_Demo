@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException, status
 
 from src.api.v1.dependencies import get_vector_store
 from src.core.config import settings
-from src.infrastructure.resilience.registry import CircuitBreakerRegistry
+from src.infrastructure.resilience import circuit_breaker_registry
 
 router = APIRouter()
 
@@ -214,7 +214,7 @@ async def list_providers():
 async def get_circuit_breakers():
     """Get circuit breaker status for all external services."""
     return {
-        "circuit_breakers": CircuitBreakerRegistry.get_all_stats(),
+        "circuit_breakers": circuit_breaker_registry.get_all_status(),
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
@@ -226,6 +226,9 @@ async def get_circuit_breakers():
 )
 async def reset_circuit_breaker(name: str):
     """Reset a circuit breaker to closed state."""
-    CircuitBreakerRegistry.reset(name)
+    cb = circuit_breaker_registry.get(name)
+    if not cb:
+        raise HTTPException(status_code=404, detail=f"Circuit breaker '{name}' not found")
+    cb.reset()
     return {"status": "reset", "circuit": name}
 

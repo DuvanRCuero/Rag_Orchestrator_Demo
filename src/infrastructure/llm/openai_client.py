@@ -14,7 +14,7 @@ from src.core.config import settings
 from src.core.exceptions import GenerationError
 from src.core.logging import get_logger
 from src.domain.interfaces.llm_service import LLMService
-from src.infrastructure.resilience import CircuitBreaker
+from src.infrastructure.resilience import circuit_breaker_registry, CircuitBreakerConfig
 
 logger = get_logger(__name__)
 
@@ -50,17 +50,15 @@ class AsyncOpenAIService(LLMService):
             temperature=self.temperature,
         )
 
-        # Initialize circuit breaker
-        self._circuit_breaker = CircuitBreaker(
-            name="openai",
-            failure_threshold=5,
-            recovery_timeout=30.0,
+        # Circuit breaker for OpenAI calls
+        self._circuit_breaker = circuit_breaker_registry.get_or_create(
+            "openai",
+            CircuitBreakerConfig(
+                failure_threshold=5,
+                recovery_timeout=30.0,
+            )
         )
-        logger.info(
-            "openai_service_initialized",
-            model=self.model,
-            temperature=self.temperature,
-        )
+        logger.info("openai_service_initialized", model=self.model)
 
     @backoff.on_exception(
         backoff.expo, (APIError, RateLimitError), max_tries=3, max_time=30

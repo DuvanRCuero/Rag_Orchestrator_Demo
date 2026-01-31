@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException, status
 from src.api.v1.dependencies import get_vector_store
 from src.core.config import settings
 from src.infrastructure.resilience import circuit_breaker_registry
+from src.infrastructure.container import container
 
 router = APIRouter()
 
@@ -248,4 +249,23 @@ async def list_chunking_strategies():
         })
     
     return {"strategies": strategies}
+
+
+@router.get(
+    "/cache-stats",
+    summary="Get cache statistics",
+    description="Get cache hit rate, memory usage, and other statistics.",
+)
+async def get_cache_stats():
+    """Get cache statistics."""
+    try:
+        cache = container.cache
+        stats = await cache.get_stats()
+        return stats
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get cache statistics: {str(e)}",
+        )
+
 

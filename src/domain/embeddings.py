@@ -11,6 +11,8 @@ from src.core.config_models import EmbeddingConfig, get_config
 from src.core.exceptions import IngestionError
 from src.core.logging import get_logger
 from src.domain.interfaces.embedding_service import EmbeddingServiceInterface
+from src.infrastructure.cache.interfaces import CacheInterface
+from src.infrastructure.cache.key_builder import CacheKeyBuilder
 
 logger = get_logger(__name__)
 
@@ -18,14 +20,17 @@ logger = get_logger(__name__)
 class EmbeddingService(EmbeddingServiceInterface):
     """Production-grade embedding service with caching, batching, and fallback."""
 
-    def __init__(self, config: EmbeddingConfig = None):
+    def __init__(
+        self, config: EmbeddingConfig = None, cache: CacheInterface = None
+    ):
         self.config = config or get_config().embedding
+        self.cache = cache  # L2 Redis cache (injected)
         
         self.model_name = self.config.model
         self.device = self.config.device
         self.dimension = self.config.dimension
         self.batch_size = 32
-        self.cache: Dict[str, List[float]] = {}
+        self._local_cache: Dict[str, List[float]] = {}  # L1 in-memory cache
         self._model = None
         self._client = None
 
@@ -94,44 +99,83 @@ class EmbeddingService(EmbeddingServiceInterface):
         return self._client
 
     async def embed_texts(self, texts: List[str]) -> List[List[float]]:
-        """Embed multiple texts with batching and caching."""
+        """Embed multiple texts with batching and two-level caching."""
         if not texts:
             return []
 
-        # Check cache first
+        # Check L1 cache (in-memory) and L2 cache (Redis)
         uncached_texts = []
         embeddings = []
         cache_indices = []
 
         for idx, text in enumerate(texts):
-            if text in self.cache:
-                embeddings.append(self.cache[text])
+            cache_key = CacheKeyBuilder.embedding_key(text, self.model_name)
+            
+            # Check L1 cache first
+            if cache_key in self._local_cache:
+                embeddings.append(self._local_cache[cache_key])
                 cache_indices.append(idx)
-            else:
-                uncached_texts.append((idx, text))
+                continue
+            
+            # Check L2 cache (Redis) if available
+            if self.cache:
+                try:
+                    cached_embedding = await self.cache.get(cache_key)
+                    if cached_embedding:
+                        self._local_cache[cache_key] = cached_embedding
+                        embeddings.append(cached_embedding)
+                        cache_indices.append(idx)
+                        continue
+                except Exception as e:
+                    logger.warning(
+                        "cache_get_failed", 
+                        key=cache_key, 
+                        error=str(e)
+                    )
+            
+            uncached_texts.append((idx, text, cache_key))
 
         # Process uncached texts
         if uncached_texts:
-            uncached_indices = [idx for idx, _ in uncached_texts]
-            uncached_texts_only = [text for _, text in uncached_texts]
+            uncached_indices = [idx for idx, _, _ in uncached_texts]
+            uncached_texts_only = [text for _, text, _ in uncached_texts]
+            cache_keys = [key for _, _, key in uncached_texts]
 
             if self.use_openai:
                 batch_embeddings = await self._embed_openai_batch(uncached_texts_only)
             else:
                 batch_embeddings = self._embed_local_batch(uncached_texts_only)
 
-            # Update cache and assemble final embeddings
+            # Update caches and assemble final embeddings
             result_embeddings = [None] * len(texts)
 
             # Fill cached embeddings
             for cache_idx in cache_indices:
                 result_embeddings[cache_idx] = embeddings.pop(0)
 
-            # Fill new embeddings
-            for i, (orig_idx, text) in enumerate(uncached_texts):
+            # Fill new embeddings and update caches
+            cache_items = {}
+            for i, (orig_idx, text, cache_key) in enumerate(uncached_texts):
                 embedding = batch_embeddings[i]
-                self.cache[text] = embedding
+                # Update L1 cache
+                self._local_cache[cache_key] = embedding
                 result_embeddings[orig_idx] = embedding
+                # Prepare for L2 cache batch update
+                cache_items[cache_key] = embedding
+
+            # Batch update L2 cache (Redis)
+            if self.cache and cache_items:
+                try:
+                    await self.cache.mset(
+                        cache_items,
+                        ttl=get_config().cache.embedding_ttl,
+                    )
+                except Exception as e:
+                    logger.warning(
+                        "cache_mset_failed",
+                        items_count=len(cache_items),
+                        error=str(e),
+                    )
 
             return result_embeddings
 
@@ -205,7 +249,8 @@ class EmbeddingService(EmbeddingServiceInterface):
 
     def clear_cache(self):
         """Clear embedding cache."""
-        self.cache.clear()
+        self._local_cache.clear()
+        logger.info("local_cache_cleared")
 
     @property
     def embedding_dimension(self) -> int:

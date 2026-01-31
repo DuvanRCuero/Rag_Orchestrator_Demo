@@ -57,6 +57,16 @@ class MemoryConfig:
 
 
 @dataclass(frozen=True)
+class CacheConfig:
+    """Cache configuration."""
+    redis_url: str = "redis://localhost:6379"
+    embedding_ttl: int = 604800  # 7 days
+    query_result_ttl: int = 3600  # 1 hour
+    session_ttl: int = 1800  # 30 minutes
+    enabled: bool = True
+
+
+@dataclass(frozen=True)
 class AppConfig:
     """Complete application configuration."""
     llm: LLMConfig
@@ -65,6 +75,7 @@ class AppConfig:
     retrieval: RetrievalConfig
     chunking: ChunkingConfig
     memory: MemoryConfig
+    cache: CacheConfig
     environment: str
     debug: bool
 
@@ -107,6 +118,13 @@ def load_config() -> AppConfig:
         memory=MemoryConfig(
             memory_type=settings.MEMORY_TYPE,
             window_size=settings.MEMORY_WINDOW_SIZE,
+        ),
+        cache=CacheConfig(
+            redis_url=getattr(settings, 'REDIS_URL', 'redis://localhost:6379'),
+            embedding_ttl=getattr(settings, 'CACHE_EMBEDDING_TTL', 604800),
+            query_result_ttl=getattr(settings, 'CACHE_QUERY_RESULT_TTL', 3600),
+            session_ttl=getattr(settings, 'CACHE_SESSION_TTL', 1800),
+            enabled=getattr(settings, 'CACHE_ENABLED', True),
         ),
         environment=settings.ENVIRONMENT,
         debug=settings.DEBUG,

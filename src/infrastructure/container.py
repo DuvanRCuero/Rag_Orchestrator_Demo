@@ -1,6 +1,9 @@
 """Dependency injection container."""
 
 from src.core.config_models import AppConfig, get_config
+from src.core.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 class Container:
@@ -31,9 +34,31 @@ class Container:
         from src.domain.embeddings import EmbeddingService
         from src.application.chains.rag_chain import AdvancedRAGChain
         from src.application.chains.memory import EnhancedConversationMemory
+        from src.infrastructure.cache import RedisCache, InMemoryCache
+
+        # Initialize cache
+        cache_config = self._config.cache
+        if cache_config.enabled:
+            try:
+                self._cache = RedisCache(
+                    url=cache_config.redis_url,
+                    default_ttl=cache_config.embedding_ttl,
+                )
+                logger.info("redis_cache_enabled", url=cache_config.redis_url)
+            except Exception as e:
+                logger.warning(
+                    "redis_cache_failed_fallback_to_memory",
+                    error=str(e),
+                )
+                self._cache = InMemoryCache(default_ttl=cache_config.embedding_ttl)
+        else:
+            self._cache = InMemoryCache(default_ttl=cache_config.embedding_ttl)
+            logger.info("cache_disabled_using_memory")
 
         self._llm = LLMFactory.create(self._config.llm.provider, self._config.llm)
-        self._embeddings = EmbeddingService(self._config.embedding)
+        self._embeddings = EmbeddingService(
+            self._config.embedding, cache=self._cache
+        )
         self._vector_store = QdrantVectorStore(
             store_config=self._config.vector_store,
             retrieval_config=self._config.retrieval,
@@ -80,6 +105,12 @@ class Container:
     def conversation_memory(self):
         self._ensure_initialized()
         return self._memory
+
+    @property
+    def cache(self):
+        """Get cache service."""
+        self._ensure_initialized()
+        return self._cache
 
     @property
     def retrieval_service(self):

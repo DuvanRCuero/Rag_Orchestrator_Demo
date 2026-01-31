@@ -86,7 +86,9 @@ class RetrievalService:
         seen = set()
         unique = []
         for chunk in chunks:
-            content_hash = hashlib.md5(chunk.content[:100].encode()).hexdigest()
+            # Use SHA-256 for better collision resistance
+            import hashlib
+            content_hash = hashlib.sha256(chunk.content[:100].encode()).hexdigest()
             if content_hash not in seen:
                 seen.add(content_hash)
                 unique.append(chunk)

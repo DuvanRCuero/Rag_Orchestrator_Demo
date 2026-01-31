@@ -53,7 +53,7 @@ class AskQuestionUseCase:
 
         # Get conversation history
         history = ""
-        if input.session_id:
+        if session_id:
             history = self.memory.get_conversation_for_context(session_id)
 
         # Query enhancement

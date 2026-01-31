@@ -1,8 +1,9 @@
 """LLM Factory - Open for extension, closed for modification."""
 
-from typing import Dict, Type
+from typing import Dict, Type, Optional
 from src.domain.interfaces.llm_service import LLMService
 from src.core.config import settings
+from src.core.config_models import LLMConfig
 
 
 class LLMFactory:
@@ -14,13 +15,13 @@ class LLMFactory:
         cls._providers[name] = provider_class
 
     @classmethod
-    def create(cls, provider: str = None) -> LLMService:
+    def create(cls, provider: str = None, config: Optional[LLMConfig] = None) -> LLMService:
         """Create an LLM service instance."""
         provider = provider or settings.LLM_PROVIDER
         if provider not in cls._providers:
             available = list(cls._providers.keys())
             raise ValueError(f"Unknown LLM provider: {provider}. Available: {available}")
-        return cls._providers[provider]()
+        return cls._providers[provider](config)
 
     @classmethod
     def available_providers(cls) -> list:

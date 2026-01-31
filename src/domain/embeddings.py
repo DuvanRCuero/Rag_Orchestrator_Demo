@@ -7,6 +7,7 @@ from openai import AsyncOpenAI
 from sentence_transformers import SentenceTransformer
 
 from src.core.config import settings
+from src.core.config_models import EmbeddingConfig, get_config
 from src.core.exceptions import IngestionError
 from src.core.logging import get_logger
 from src.domain.interfaces.embedding_service import EmbeddingServiceInterface
@@ -17,9 +18,12 @@ logger = get_logger(__name__)
 class EmbeddingService(EmbeddingServiceInterface):
     """Production-grade embedding service with caching, batching, and fallback."""
 
-    def __init__(self):
-        self.model_name = settings.EMBEDDING_MODEL
-        self.device = settings.EMBEDDING_DEVICE
+    def __init__(self, config: EmbeddingConfig = None):
+        self.config = config or get_config().embedding
+        
+        self.model_name = self.config.model
+        self.device = self.config.device
+        self.dimension = self.config.dimension
         self.batch_size = 32
         self.cache: Dict[str, List[float]] = {}
         self._model = None
@@ -27,7 +31,6 @@ class EmbeddingService(EmbeddingServiceInterface):
 
         # Determine which embedding backend to use
         self.use_openai = self.model_name.startswith("text-embedding")
-        self.dimension = self._get_dimension()
 
     def _get_dimension(self) -> int:
         """Get embedding dimension without loading the model."""
@@ -55,7 +58,9 @@ class EmbeddingService(EmbeddingServiceInterface):
         """Lazy initialization of the model."""
         if self.use_openai:
             if self._client is None:
-                self._client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+                # Get API key from main config
+                api_key = get_config().llm.api_key
+                self._client = AsyncOpenAI(api_key=api_key)
                 logger.info(
                     "openai_embedding_service_initialized",
                     model=self.model_name,

@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 
 from src.api.v1.dependencies import get_rag_chain, get_session_id, get_ask_question_use_case, get_stream_answer_use_case
+from src.api.decorators import handle_exceptions
 from src.application.chains.rag_chain import AdvancedRAGChain
 from src.application.use_cases import AskQuestionUseCase, StreamAnswerUseCase, AskQuestionInput, StreamInput
 from src.core.config import settings
@@ -20,37 +21,31 @@ router = APIRouter()
     summary="Ask a question",
     description="Ask a question and get an answer with citations and confidence score.",
 )
+@handle_exceptions("Query processing")
 async def ask_question(
     request: QueryRequest,
     session_id: Optional[str] = None,
     use_case: AskQuestionUseCase = Depends(get_ask_question_use_case),
 ):
     """Ask a question to the RAG system."""
-    try:
-        # Get or generate session ID
-        actual_session_id = get_session_id(session_id)
+    # Get or generate session ID
+    actual_session_id = get_session_id(session_id)
 
-        # Execute use case
-        result = await use_case.execute(AskQuestionInput(
-            query=request.query,
-            session_id=actual_session_id,
-            top_k=request.top_k or 5,
-        ))
+    # Execute use case
+    result = await use_case.execute(AskQuestionInput(
+        query=request.query,
+        session_id=actual_session_id,
+        top_k=request.top_k or 5,
+    ))
 
-        return QueryResponse(
-            answer=result.answer,
-            sources=result.sources,
-            session_id=result.session_id,
-            query_time=result.query_time,
-            token_usage=result.token_usage,
-            confidence=result.confidence,
-        )
-
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to process query: {str(e)}",
-        )
+    return QueryResponse(
+        answer=result.answer,
+        sources=result.sources,
+        session_id=result.session_id,
+        query_time=result.query_time,
+        token_usage=result.token_usage,
+        confidence=result.confidence,
+    )
 
 
 @router.post(
@@ -58,67 +53,61 @@ async def ask_question(
     summary="Stream answer",
     description="Stream the answer token by token for real-time experience.",
 )
+@handle_exceptions("Answer streaming")
 async def stream_answer(
     request: QueryRequest,
     session_id: Optional[str] = None,
     use_case: StreamAnswerUseCase = Depends(get_stream_answer_use_case),
 ):
     """Stream answer token by token."""
-    try:
-        # Get session ID
-        actual_session_id = get_session_id(session_id)
+    # Get session ID
+    actual_session_id = get_session_id(session_id)
 
-        # Execute use case
-        retrieval_result, stream = await use_case.execute(StreamInput(
-            query=request.query,
-            session_id=actual_session_id,
-            top_k=request.top_k or 5,
-        ))
+    # Execute use case
+    retrieval_result, stream = await use_case.execute(StreamInput(
+        query=request.query,
+        session_id=actual_session_id,
+        top_k=request.top_k or 5,
+    ))
 
-        # Create streaming response
-        async def generate():
-            """Generate streaming response."""
-            try:
-                # Start with retrieval metadata
-                retrieval_data = {
-                    "type": "retrieval_complete",
-                    "chunks_retrieved": len(retrieval_result.chunks),
-                    "retrieval_time": retrieval_result.retrieval_time,
+    # Create streaming response
+    async def generate():
+        """Generate streaming response."""
+        try:
+            # Start with retrieval metadata
+            retrieval_data = {
+                "type": "retrieval_complete",
+                "chunks_retrieved": len(retrieval_result.chunks),
+                "retrieval_time": retrieval_result.retrieval_time,
+            }
+            yield f"data: {json.dumps(retrieval_data)}\n\n"
+
+            # Stream answer
+            async for token in stream:
+                token_data = {
+                    "type": "token",
+                    "token": token,
+                    "session_id": actual_session_id,
                 }
-                yield f"data: {json.dumps(retrieval_data)}\n\n"
+                yield f"data: {json.dumps(token_data)}\n\n"
 
-                # Stream answer
-                async for token in stream:
-                    token_data = {
-                        "type": "token",
-                        "token": token,
-                        "session_id": actual_session_id,
-                    }
-                    yield f"data: {json.dumps(token_data)}\n\n"
+            # End of stream
+            complete_data = {"type": "complete", "session_id": actual_session_id}
+            yield f"data: {json.dumps(complete_data)}\n\n"
 
-                # End of stream
-                complete_data = {"type": "complete", "session_id": actual_session_id}
-                yield f"data: {json.dumps(complete_data)}\n\n"
+        except Exception as e:
+            error_data = {"type": "error", "error": str(e)}
+            yield f"data: {json.dumps(error_data)}\n\n"
 
-            except Exception as e:
-                error_data = {"type": "error", "error": str(e)}
-                yield f"data: {json.dumps(error_data)}\n\n"
-
-        return StreamingResponse(
-            generate(),
-            media_type="text/event-stream",
-            headers={
-                "Cache-Control": "no-cache",
-                "Connection": "keep-alive",
-                "X-Accel-Buffering": "no",  # Disable buffering for nginx
-            },
-        )
-
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to stream answer: {str(e)}",
-        )
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",  # Disable buffering for nginx
+        },
+    )
 
 
 @router.post(
@@ -126,6 +115,7 @@ async def stream_answer(
     summary="Retrieve only",
     description="Retrieve relevant document chunks without generating an answer.",
 )
+@handle_exceptions("Document retrieval")
 async def retrieve_only(
     query: str = Query(..., description="The query to search for"),
     top_k: int = Query(5, description="Number of chunks to retrieve"),
@@ -134,41 +124,34 @@ async def retrieve_only(
     rag_chain: AdvancedRAGChain = Depends(get_rag_chain),
 ):
     """Retrieve document chunks without generating an answer."""
-    try:
-        retrieval_result = await rag_chain.retrieve(
-            query=query,
-            top_k=top_k,
-            use_multi_query=use_multi_query,
-            use_reranking=use_reranking,
-        )
+    retrieval_result = await rag_chain.retrieve(
+        query=query,
+        top_k=top_k,
+        use_multi_query=use_multi_query,
+        use_reranking=use_reranking,
+    )
 
-        return {
-            "query": query,
-            "chunks": [
-                {
-                    "id": chunk.id,
-                    "content": chunk.content[:500] + "..."
-                    if len(chunk.content) > 500
-                    else chunk.content,
-                    "metadata": chunk.metadata,
-                    "document_id": chunk.document_id,
-                    "score": chunk.metadata.get("search_score", 0.0),
-                }
-                for chunk in retrieval_result.chunks
-            ],
-            "retrieval_metadata": {
-                "method": retrieval_result.retrieval_method,
-                "time": retrieval_result.retrieval_time,
-                "query_variations": retrieval_result.query_variations,
-                "reranked": retrieval_result.reranked,
-            },
-        }
-
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Retrieval failed: {str(e)}",
-        )
+    return {
+        "query": query,
+        "chunks": [
+            {
+                "id": chunk.id,
+                "content": chunk.content[:500] + "..."
+                if len(chunk.content) > 500
+                else chunk.content,
+                "metadata": chunk.metadata,
+                "document_id": chunk.document_id,
+                "score": chunk.metadata.get("search_score", 0.0),
+            }
+            for chunk in retrieval_result.chunks
+        ],
+        "retrieval_metadata": {
+            "method": retrieval_result.retrieval_method,
+            "time": retrieval_result.retrieval_time,
+            "query_variations": retrieval_result.query_variations,
+            "reranked": retrieval_result.reranked,
+        },
+    }
 
 
 @router.post(
@@ -176,6 +159,7 @@ async def retrieve_only(
     summary="Verify answer",
     description="Verify an answer against the context using chain-of-verification.",
 )
+@handle_exceptions("Answer verification")
 async def verify_answer(
     question: str = Query(..., description="The original question"),
     answer: str = Query(..., description="The answer to verify"),
@@ -183,26 +167,19 @@ async def verify_answer(
     rag_chain: AdvancedRAGChain = Depends(get_rag_chain),
 ):
     """Verify an answer using chain-of-verification."""
-    try:
-        # This would use the verification chain directly
-        # For now, return a mock response
-        return {
-            "question": question,
-            "answer": answer,
-            "verification": {
-                "verified_claims": 3,
-                "unverified_claims": 1,
-                "contradictions": 0,
-                "confidence": 0.75,
-                "report": "Answer is mostly verified with one unsubstantiated claim.",
-            },
-        }
-
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Verification failed: {str(e)}",
-        )
+    # This would use the verification chain directly
+    # For now, return a mock response
+    return {
+        "question": question,
+        "answer": answer,
+        "verification": {
+            "verified_claims": 3,
+            "unverified_claims": 1,
+            "contradictions": 0,
+            "confidence": 0.75,
+            "report": "Answer is mostly verified with one unsubstantiated claim.",
+        },
+    }
 
 
 @router.get(

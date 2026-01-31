@@ -11,6 +11,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from openai import APIError, AsyncOpenAI, RateLimitError
 
 from src.core.config import settings
+from src.core.config_models import LLMConfig, get_config
 from src.core.exceptions import GenerationError
 from src.core.logging import get_logger
 from src.domain.interfaces.llm_service import LLMService
@@ -22,25 +23,20 @@ logger = get_logger(__name__)
 class AsyncOpenAIService(LLMService):
     """Async OpenAI service with retry, fallback, and streaming support."""
 
-    def __init__(self):
-        self.client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
-        self.model = settings.OPENAI_MODEL
-        self.temperature = settings.OPENAI_TEMPERATURE
-        self.max_tokens = settings.OPENAI_MAX_TOKENS
-
-        # Circuit breaker for OpenAI
-        self._circuit_breaker = CircuitBreakerRegistry.get_or_create(
-            name="openai",
-            failure_threshold=5,
-            recovery_timeout=60.0,
-        )
+    def __init__(self, config: LLMConfig = None):
+        self.config = config or get_config().llm
+        
+        self.client = AsyncOpenAI(api_key=self.config.api_key)
+        self.model = self.config.model
+        self.temperature = self.config.temperature
+        self.max_tokens = self.config.max_tokens
 
         # Initialize LangChain LLM for LCEL chains
         self.langchain_llm = ChatOpenAI(
             model=self.model,
             temperature=self.temperature,
             max_tokens=self.max_tokens,
-            api_key=settings.OPENAI_API_KEY,
+            api_key=self.config.api_key,
             streaming=True,
         )
         
@@ -106,24 +102,25 @@ class AsyncOpenAIService(LLMService):
                 temperature=temperature or self.temperature,
                 max_tokens=max_tokens or self.max_tokens,
                 stream=stream,
-                temperature=temperature,
-                max_tokens=max_tokens,
                 **kwargs,
             )
             
-            if not stream:
+            if stream:
+                return response
+            else:
+                result = response.choices[0].message.content
                 logger.info(
                     "openai_generate_success",
                     response_length=len(result),
                 )
-            return result
+                return result
 
         try:
             result = await self._circuit_breaker.call(_do_generate)
-            if not stream:
+            if not stream and isinstance(result, str):
                 logger.info(
                     "generate_completed",
-                    response_length=len(result) if result else 0,
+                    response_length=len(result),
                     model=self.model,
                 )
             return result
@@ -204,7 +201,7 @@ class AsyncOpenAIService(LLMService):
                     model=self.model,
                     temperature=self.temperature,
                     max_tokens=self.max_tokens,
-                    api_key=settings.OPENAI_API_KEY,
+                    api_key=self.config.api_key,
                     streaming=True,
                     callbacks=[callback_handler],
                 )

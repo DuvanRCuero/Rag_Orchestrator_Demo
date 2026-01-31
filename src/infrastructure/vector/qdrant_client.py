@@ -14,6 +14,7 @@ from qdrant_client.models import (
 )
 
 from src.core.config import settings
+from src.core.config_models import VectorStoreConfig, RetrievalConfig, get_config
 from src.core.exceptions import RetrievalError
 from src.core.logging import get_logger
 from src.core.schemas import DocumentChunk
@@ -27,12 +28,20 @@ logger = get_logger(__name__)
 class QdrantVectorStore(VectorStore):
     """Production-grade Qdrant implementation with hybrid search."""
 
-    def __init__(self):
+    def __init__(
+        self,
+        store_config: VectorStoreConfig = None,
+        retrieval_config: RetrievalConfig = None,
+    ):
+        config = get_config()
+        self.store_config = store_config or config.vector_store
+        self.retrieval_config = retrieval_config or config.retrieval
+        
         self._client = None
-        self.collection_name = settings.QDRANT_COLLECTION_NAME
+        self.collection_name = self.store_config.collection_name
         self._initialized = False
         # For direct HTTP calls to v1.7.4
-        self.http_url = "http://localhost:6333"
+        self.http_url = self.store_config.url
         # BM25 support
         self._bm25_scorer = BM25Scorer()
         self._bm25_indexed = False
@@ -72,7 +81,7 @@ class QdrantVectorStore(VectorStore):
                 self.client.create_collection(
                     collection_name=self.collection_name,
                     vectors_config=VectorParams(
-                        size=settings.EMBEDDING_DIMENSION,
+                        size=get_config().embedding.dimension,
                         distance=Distance.COSINE,
                     ),
                 )
@@ -183,7 +192,7 @@ class QdrantVectorStore(VectorStore):
             )
             return False
 
-    async def _do_search(
+    async def search(
             self,
             query_embedding: List[float],
             top_k: int = 5,
@@ -204,43 +213,44 @@ class QdrantVectorStore(VectorStore):
                 "limit": top_k * 2,
                 "with_payload": True,
                 "with_vector": False,
-                "score_threshold": score_threshold or settings.RETRIEVAL_SCORE_THRESHOLD,
+                "score_threshold": score_threshold or self.retrieval_config.score_threshold,
             }
 
-        result = response.json()
-        search_results = result.get("result", [])
+            # Make HTTP request
+            response = requests.post(
+                f"{self.http_url}/collections/{self.collection_name}/points/search",
+                json=search_payload,
+                timeout=30
+            )
+            response.raise_for_status()
 
-        # Convert to DocumentChunk objects
-        chunks = []
-        for item in search_results:
-            try:
-                payload = item["payload"]
-                confidence = float(item.get("score", 0.0))
+            result = response.json()
+            search_results = result.get("result", [])
 
-                chunk = DocumentChunk(
-                    id=payload["id"],
-                    content=payload["content"],
-                    metadata=payload["metadata"],
-                    document_id=payload["document_id"],
-                    chunk_index=payload["chunk_index"],
-                    created_at=datetime.fromisoformat(
-                        payload["created_at"].replace("Z", "+00:00")
-                    ),
-                )
+            # Convert to DocumentChunk objects
+            chunks = []
+            for item in search_results:
+                try:
+                    payload = item["payload"]
+                    confidence = float(item.get("score", 0.0))
 
-                chunk.metadata["search_score"] = confidence
-                chunk.metadata["search_rank"] = len(chunks) + 1
-                chunks.append(chunk)
+                    chunk = DocumentChunk(
+                        id=payload["id"],
+                        content=payload["content"],
+                        metadata=payload["metadata"],
+                        document_id=payload["document_id"],
+                        chunk_index=payload["chunk_index"],
+                        created_at=datetime.fromisoformat(
+                            payload["created_at"].replace("Z", "+00:00")
+                        ),
+                    )
 
-            except Exception as chunk_error:
-                logger.warning("qdrant_result_parse_failed", error=str(chunk_error))
-                continue
+                    chunk.metadata["search_score"] = confidence
+                    chunk.metadata["search_rank"] = len(chunks) + 1
+                    chunks.append(chunk)
 
                 except Exception as chunk_error:
-                    logger.warning(
-                        "search_result_processing_failed",
-                        error=str(chunk_error),
-                    )
+                    logger.warning("qdrant_result_parse_failed", error=str(chunk_error))
                     continue
 
             return chunks[:top_k]
@@ -360,12 +370,12 @@ class QdrantVectorStore(VectorStore):
         for rank, chunk in enumerate(semantic_results, 1):
             scores[chunk.id] = {
                 'chunk': chunk,
-                'rrf': settings.SEMANTIC_WEIGHT / (k + rank),
+                'rrf': self.retrieval_config.semantic_weight / (k + rank),
             }
 
         for rank, result in enumerate(bm25_results, 1):
             if result.chunk_id in scores:
-                scores[result.chunk_id]['rrf'] += settings.BM25_WEIGHT / (k + rank)
+                scores[result.chunk_id]['rrf'] += self.retrieval_config.bm25_weight / (k + rank)
             else:
                 chunk = DocumentChunk(
                     id=result.chunk_id,
@@ -376,7 +386,7 @@ class QdrantVectorStore(VectorStore):
                 )
                 scores[result.chunk_id] = {
                     'chunk': chunk,
-                    'rrf': settings.BM25_WEIGHT / (k + rank),
+                    'rrf': self.retrieval_config.bm25_weight / (k + rank),
                 }
 
         sorted_results = sorted(scores.values(), key=lambda x: x['rrf'], reverse=True)

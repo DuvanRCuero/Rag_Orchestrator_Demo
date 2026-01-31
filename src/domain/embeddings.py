@@ -285,14 +285,15 @@ class EmbeddingService(EmbeddingServiceInterface):
 
         return float(np.dot(vec1, vec2) / (norm1 * norm2))
 
-    def clear_cache(self):
-        """Clear embedding cache."""
+    async def clear_cache(self):
+        """Clear embedding cache.
+        
+        This is an async method to properly handle cache service clearing.
+        """
         self.cache.clear()
         # Also clear the cache service if available
         if self.cache_service:
-            # Note: This is sync, but cache_service.clear() is async
-            # In production, you'd want to handle this properly
-            asyncio.create_task(self.cache_service.clear())
+            await self.cache_service.clear()
 
     def get_cache_stats(self) -> Dict[str, int]:
         """Get cache statistics.

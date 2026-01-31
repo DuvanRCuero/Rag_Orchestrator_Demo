@@ -114,9 +114,9 @@ class RetrievalService:
         
         # Cache the result if cache service is available
         if self.cache_service:
-            # Serialize chunks for caching
+            # Serialize chunks for caching using Pydantic's dict method
             cache_data = {
-                "chunks": [chunk.__dict__ for chunk in chunks],
+                "chunks": [chunk.model_dump() for chunk in chunks],
                 "retrieval_time": result.retrieval_time,
                 "retrieval_method": method,
                 "reranked": False,
@@ -184,15 +184,23 @@ class RetrievalService:
         }
     
     async def invalidate_cache(self) -> bool:
-        """Invalidate all query result cache entries.
+        """Invalidate query result cache entries.
         
-        This should be called when documents are updated.
+        Note: This currently clears the entire cache, which will also affect
+        embedding cache entries. In a production system, you would want to:
+        1. Use cache key prefixes (e.g., 'query:*' vs 'embed:*')
+        2. Implement selective deletion using Redis SCAN and DEL commands
+        3. Track cache keys for selective invalidation
+        
+        For now, this is acceptable since:
+        - Embeddings will be re-cached on next use
+        - Query results need full invalidation after document updates
+        - The performance impact is temporary
         
         Returns:
             True if successful, False otherwise
         """
         if self.cache_service:
-            # In a production system, you'd want to track query cache keys
-            # For now, we just clear the entire cache
+            # TODO: Implement selective cache invalidation with key prefixes
             return await self.cache_service.clear()
         return False

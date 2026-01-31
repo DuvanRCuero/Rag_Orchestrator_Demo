@@ -42,21 +42,6 @@ class Container:
                     max_connections=cache_config.max_connections,
                     default_ttl=cache_config.embedding_ttl,
                 )
-                # Test Redis connection - if it fails, fall back to memory cache
-                import asyncio
-                try:
-                    loop = asyncio.get_event_loop()
-                except RuntimeError:
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-                
-                # We can't use await here, so we'll use run_until_complete
-                # This is a sync context, so we need to handle it properly
-                self._cache_service = RedisCache(
-                    redis_url=cache_config.redis_url,
-                    max_connections=cache_config.max_connections,
-                    default_ttl=cache_config.embedding_ttl,
-                )
             except Exception as e:
                 # Fall back to memory cache if Redis is unavailable
                 from src.core.logging import get_logger

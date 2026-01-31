@@ -18,13 +18,20 @@ class MemoryCache(CacheService):
     def __init__(self, max_size: int = 10000, default_ttl: int = 3600):
         """Initialize in-memory cache.
         
+        Note: This implementation uses a dual TTL approach:
+        1. TTLCache provides automatic cleanup of expired entries
+        2. Per-key expiration metadata allows for variable TTLs
+        
+        The TTLCache's global TTL serves as a maximum lifetime for all entries,
+        while per-key expiration allows for shorter TTLs when needed.
+        
         Args:
             max_size: Maximum number of entries to store
-            default_ttl: Default TTL in seconds
+            default_ttl: Default TTL in seconds (used as TTLCache TTL)
         """
         self.default_ttl = default_ttl
         self.max_size = max_size
-        # Using TTLCache with default TTL
+        # Using TTLCache with default TTL for automatic cleanup
         self._cache = TTLCache(maxsize=max_size, ttl=default_ttl)
         self._lock = asyncio.Lock()
     

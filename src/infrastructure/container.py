@@ -138,6 +138,7 @@ class Container:
             self._retrieval_service = RetrievalService(
                 vector_store=self._vector_store,
                 embedding_service=self._embeddings,
+                cache_service=self._cache_service,
             )
         return self._retrieval_service
 

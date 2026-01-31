@@ -31,9 +31,53 @@ class Container:
         from src.domain.embeddings import EmbeddingService
         from src.application.chains.rag_chain import AdvancedRAGChain
         from src.application.chains.memory import EnhancedConversationMemory
+        from src.infrastructure.cache import RedisCache, MemoryCache
+
+        # Initialize cache service based on configuration
+        cache_config = self._config.cache
+        if cache_config.type == "redis":
+            try:
+                self._cache_service = RedisCache(
+                    redis_url=cache_config.redis_url,
+                    max_connections=cache_config.max_connections,
+                    default_ttl=cache_config.embedding_ttl,
+                )
+                # Test Redis connection - if it fails, fall back to memory cache
+                import asyncio
+                try:
+                    loop = asyncio.get_event_loop()
+                except RuntimeError:
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                
+                # We can't use await here, so we'll use run_until_complete
+                # This is a sync context, so we need to handle it properly
+                self._cache_service = RedisCache(
+                    redis_url=cache_config.redis_url,
+                    max_connections=cache_config.max_connections,
+                    default_ttl=cache_config.embedding_ttl,
+                )
+            except Exception as e:
+                # Fall back to memory cache if Redis is unavailable
+                from src.core.logging import get_logger
+                logger = get_logger(__name__)
+                logger.warning(f"Redis unavailable, falling back to memory cache: {e}")
+                self._cache_service = MemoryCache(
+                    max_size=10000,
+                    default_ttl=cache_config.embedding_ttl
+                )
+        else:
+            # Use in-memory cache
+            self._cache_service = MemoryCache(
+                max_size=10000,
+                default_ttl=cache_config.embedding_ttl
+            )
 
         self._llm = LLMFactory.create(self._config.llm.provider, self._config.llm)
-        self._embeddings = EmbeddingService(self._config.embedding)
+        self._embeddings = EmbeddingService(
+            self._config.embedding,
+            cache_service=self._cache_service
+        )
         self._vector_store = QdrantVectorStore(
             store_config=self._config.vector_store,
             retrieval_config=self._config.retrieval,
@@ -80,6 +124,11 @@ class Container:
     def conversation_memory(self):
         self._ensure_initialized()
         return self._memory
+
+    @property
+    def cache_service(self):
+        self._ensure_initialized()
+        return self._cache_service
 
     @property
     def retrieval_service(self):

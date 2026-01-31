@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 from typing import Any, Dict, List, Optional
 
 import backoff
@@ -11,6 +12,7 @@ from src.core.config_models import EmbeddingConfig, get_config
 from src.core.exceptions import IngestionError
 from src.core.logging import get_logger
 from src.domain.interfaces.embedding_service import EmbeddingServiceInterface
+from src.domain.interfaces.cache_service import CacheService
 
 logger = get_logger(__name__)
 
@@ -18,14 +20,22 @@ logger = get_logger(__name__)
 class EmbeddingService(EmbeddingServiceInterface):
     """Production-grade embedding service with caching, batching, and fallback."""
 
-    def __init__(self, config: EmbeddingConfig = None):
+    def __init__(self, config: EmbeddingConfig = None, cache_service: Optional[CacheService] = None):
         self.config = config or get_config().embedding
+        self.cache_service = cache_service
         
         self.model_name = self.config.model
         self.device = self.config.device
         self.dimension = self.config.dimension
         self.batch_size = 32
+        
+        # Keep in-memory cache as fallback when cache_service is not provided
         self.cache: Dict[str, List[float]] = {}
+        
+        # Cache statistics
+        self.cache_hits = 0
+        self.cache_misses = 0
+        
         self._model = None
         self._client = None
 
@@ -93,11 +103,81 @@ class EmbeddingService(EmbeddingServiceInterface):
             self._initialize_model()
         return self._client
 
+    def _generate_cache_key(self, text: str) -> str:
+        """Generate a cache key using hash of text content.
+        
+        Args:
+            text: Text to generate cache key for
+            
+        Returns:
+            Hash-based cache key
+        """
+        # Use SHA256 for consistent hashing
+        text_hash = hashlib.sha256(text.encode('utf-8')).hexdigest()
+        # Prefix with embedding model to avoid collisions across models
+        return f"embed:{self.model_name}:{text_hash}"
+
     async def embed_texts(self, texts: List[str]) -> List[List[float]]:
         """Embed multiple texts with batching and caching."""
         if not texts:
             return []
 
+        # Use cache service if available, otherwise fall back to in-memory cache
+        if self.cache_service:
+            return await self._embed_texts_with_cache_service(texts)
+        else:
+            return await self._embed_texts_with_memory_cache(texts)
+
+    async def _embed_texts_with_cache_service(self, texts: List[str]) -> List[List[float]]:
+        """Embed texts using the injected cache service."""
+        # Generate cache keys
+        cache_keys = [self._generate_cache_key(text) for text in texts]
+        
+        # Check cache
+        cached_data = await self.cache_service.get_many(cache_keys)
+        
+        # Identify uncached texts
+        uncached_texts = []
+        result_embeddings = [None] * len(texts)
+        
+        for idx, (text, cache_key) in enumerate(zip(texts, cache_keys)):
+            if cache_key in cached_data:
+                result_embeddings[idx] = cached_data[cache_key]
+                self.cache_hits += 1
+            else:
+                uncached_texts.append((idx, text))
+                self.cache_misses += 1
+        
+        # Process uncached texts
+        if uncached_texts:
+            uncached_indices = [idx for idx, _ in uncached_texts]
+            uncached_texts_only = [text for _, text in uncached_texts]
+            
+            if self.use_openai:
+                batch_embeddings = await self._embed_openai_batch(uncached_texts_only)
+            else:
+                batch_embeddings = self._embed_local_batch(uncached_texts_only)
+            
+            # Update cache and assemble final embeddings
+            cache_updates = {}
+            for i, (orig_idx, text) in enumerate(uncached_texts):
+                embedding = batch_embeddings[i]
+                result_embeddings[orig_idx] = embedding
+                cache_key = self._generate_cache_key(text)
+                cache_updates[cache_key] = embedding
+            
+            # Batch update cache with TTL from config
+            if cache_updates:
+                cache_config = get_config().cache
+                await self.cache_service.set_many(
+                    cache_updates,
+                    ttl_seconds=cache_config.embedding_ttl
+                )
+        
+        return result_embeddings
+
+    async def _embed_texts_with_memory_cache(self, texts: List[str]) -> List[List[float]]:
+        """Embed texts using the in-memory fallback cache (legacy behavior)."""
         # Check cache first
         uncached_texts = []
         embeddings = []
@@ -107,8 +187,10 @@ class EmbeddingService(EmbeddingServiceInterface):
             if text in self.cache:
                 embeddings.append(self.cache[text])
                 cache_indices.append(idx)
+                self.cache_hits += 1
             else:
                 uncached_texts.append((idx, text))
+                self.cache_misses += 1
 
         # Process uncached texts
         if uncached_texts:
@@ -206,6 +288,26 @@ class EmbeddingService(EmbeddingServiceInterface):
     def clear_cache(self):
         """Clear embedding cache."""
         self.cache.clear()
+        # Also clear the cache service if available
+        if self.cache_service:
+            # Note: This is sync, but cache_service.clear() is async
+            # In production, you'd want to handle this properly
+            asyncio.create_task(self.cache_service.clear())
+
+    def get_cache_stats(self) -> Dict[str, int]:
+        """Get cache statistics.
+        
+        Returns:
+            Dictionary with cache hits, misses, and hit rate
+        """
+        total = self.cache_hits + self.cache_misses
+        hit_rate = (self.cache_hits / total * 100) if total > 0 else 0
+        return {
+            "hits": self.cache_hits,
+            "misses": self.cache_misses,
+            "total": total,
+            "hit_rate_percent": round(hit_rate, 2)
+        }
 
     @property
     def embedding_dimension(self) -> int:

@@ -42,3 +42,13 @@ def get_session_id(session_id: str = None):
 
         session_id = str(uuid.uuid4())
     return session_id
+
+
+def get_ask_question_use_case():
+    """Dependency to get ask question use case."""
+    return container.ask_question_use_case
+
+
+def get_stream_answer_use_case():
+    """Dependency to get stream answer use case."""
+    return container.stream_answer_use_case

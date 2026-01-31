@@ -5,8 +5,9 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 
-from src.api.v1.dependencies import get_rag_chain, get_session_id
+from src.api.v1.dependencies import get_rag_chain, get_session_id, get_ask_question_use_case, get_stream_answer_use_case
 from src.application.chains.rag_chain import AdvancedRAGChain
+from src.application.use_cases import AskQuestionUseCase, StreamAnswerUseCase, AskQuestionInput, StreamInput
 from src.core.config import settings
 from src.core.schemas import QueryRequest, QueryResponse
 
@@ -22,31 +23,27 @@ router = APIRouter()
 async def ask_question(
     request: QueryRequest,
     session_id: Optional[str] = None,
-    rag_chain: AdvancedRAGChain = Depends(get_rag_chain),
+    use_case: AskQuestionUseCase = Depends(get_ask_question_use_case),
 ):
     """Ask a question to the RAG system."""
     try:
         # Get or generate session ID
         actual_session_id = get_session_id(session_id)
 
-        # Run full RAG pipeline
-        retrieval_result, generation_result = await rag_chain.run_full_pipeline(
+        # Execute use case
+        result = await use_case.execute(AskQuestionInput(
             query=request.query,
             session_id=actual_session_id,
             top_k=request.top_k or 5,
-            temperature=request.temperature or 0.1,
-        )
-
-        # Calculate total time
-        total_time = retrieval_result.retrieval_time + generation_result.generation_time
+        ))
 
         return QueryResponse(
-            answer=generation_result.answer,
-            sources=retrieval_result.chunks,
-            session_id=actual_session_id,
-            query_time=total_time,
-            token_usage=generation_result.token_usage,
-            confidence=generation_result.confidence_score,
+            answer=result.answer,
+            sources=result.sources,
+            session_id=result.session_id,
+            query_time=result.query_time,
+            token_usage=result.token_usage,
+            confidence=result.confidence,
         )
 
     except Exception as e:
@@ -64,17 +61,19 @@ async def ask_question(
 async def stream_answer(
     request: QueryRequest,
     session_id: Optional[str] = None,
-    rag_chain: AdvancedRAGChain = Depends(get_rag_chain),
+    use_case: StreamAnswerUseCase = Depends(get_stream_answer_use_case),
 ):
     """Stream answer token by token."""
     try:
         # Get session ID
         actual_session_id = get_session_id(session_id)
 
-        # Perform retrieval first
-        retrieval_result = await rag_chain.retrieve(
-            query=request.query, top_k=request.top_k or 5
-        )
+        # Execute use case
+        retrieval_result, stream = await use_case.execute(StreamInput(
+            query=request.query,
+            session_id=actual_session_id,
+            top_k=request.top_k or 5,
+        ))
 
         # Create streaming response
         async def generate():
@@ -89,11 +88,7 @@ async def stream_answer(
                 yield f"data: {json.dumps(retrieval_data)}\n\n"
 
                 # Stream answer
-                async for token in rag_chain.stream_answer(
-                    query=request.query,
-                    context_chunks=retrieval_result.chunks,
-                    session_id=actual_session_id,
-                ):
+                async for token in stream:
                     token_data = {
                         "type": "token",
                         "token": token,

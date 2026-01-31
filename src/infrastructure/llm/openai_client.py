@@ -102,17 +102,18 @@ class AsyncOpenAIService(LLMService):
                 temperature=temperature or self.temperature,
                 max_tokens=max_tokens or self.max_tokens,
                 stream=stream,
-                temperature=temperature,
-                max_tokens=max_tokens,
                 **kwargs,
             )
             
-            if not stream:
+            if stream:
+                return response
+            else:
+                result = response.choices[0].message.content
                 logger.info(
                     "openai_generate_success",
                     response_length=len(result),
                 )
-            return result
+                return result
 
         try:
             result = await self._circuit_breaker.call(_do_generate)

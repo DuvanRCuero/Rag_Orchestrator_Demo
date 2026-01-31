@@ -10,26 +10,34 @@ from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse
 
 from src.api.middleware.error_handler import global_exception_handler
+from src.api.middleware.logging_middleware import LoggingMiddleware
 from src.api.v1.router import api_router
 from src.core.config import settings
 from src.core.exceptions import RAGException
+from src.core.logging import setup_logging, get_logger
+
+# Setup logging at startup
+setup_logging()
+logger = get_logger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan context manager for startup/shutdown events."""
     # Startup
-    print("🚀 Starting RAG Orchestrator API...")
-    print(f"📁 Environment: {settings.ENVIRONMENT}")
-    print(f"🔧 Debug Mode: {settings.DEBUG}")
-    print(f"💾 Vector DB: {settings.VECTOR_DB_TYPE}")
-    print(f"🧠 LLM: {settings.LLM_PROVIDER} - {settings.OPENAI_MODEL}")
+    logger.info(
+        "application_starting",
+        environment=settings.ENVIRONMENT,
+        debug=settings.DEBUG,
+        vector_db=settings.VECTOR_DB_TYPE,
+        llm=f"{settings.LLM_PROVIDER} - {settings.OPENAI_MODEL}",
+    )
 
     # Initialize services here if needed
     yield
 
     # Shutdown
-    print("🛑 Shutting down RAG Orchestrator API...")
+    logger.info("application_shutdown")
 
 
 def create_application() -> FastAPI:
@@ -55,8 +63,8 @@ def create_application() -> FastAPI:
         allow_headers=["*"],
     )
 
-    # Add middleware
-    app.middleware("http")(log_requests)
+    # Add logging middleware
+    app.add_middleware(LoggingMiddleware)
 
     # Add exception handlers
     app.add_exception_handler(RAGException, global_exception_handler)
@@ -148,28 +156,6 @@ def create_application() -> FastAPI:
         )
 
     return app
-
-
-async def log_requests(request: Request, call_next):
-    """Middleware to log requests."""
-    start_time = time.time()
-
-    response = await call_next(request)
-
-    process_time = (time.time() - start_time) * 1000
-    formatted_time = f"{process_time:.2f}"
-
-    # Log request details (in production, use structured logging)
-    print(
-        f"{request.method} {request.url.path} "
-        f"Status: {response.status_code} "
-        f"Duration: {formatted_time}ms"
-    )
-
-    # Add performance header
-    response.headers["X-Process-Time"] = formatted_time
-
-    return response
 
 
 # Create application instance

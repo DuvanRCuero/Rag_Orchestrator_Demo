@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException, status
 
 from src.api.v1.dependencies import get_vector_store
 from src.core.config import settings
+from src.infrastructure.resilience.registry import CircuitBreakerRegistry
 
 router = APIRouter()
 
@@ -203,3 +204,26 @@ async def list_providers():
         "available_providers": LLMFactory.available_providers(),
         "current_provider": settings.LLM_PROVIDER,
     }
+
+
+@router.get(
+    "/circuit-breakers",
+    summary="Get circuit breaker status",
+    description="Get the status of all circuit breakers in the system.",
+)
+async def get_circuit_breaker_status():
+    """Get status of all circuit breakers."""
+    return {
+        "circuit_breakers": CircuitBreakerRegistry.all_stats(),
+    }
+
+
+@router.post(
+    "/circuit-breakers/reset",
+    summary="Reset circuit breakers",
+    description="Reset all circuit breakers (admin only).",
+)
+async def reset_circuit_breakers():
+    """Reset all circuit breakers (admin only)."""
+    CircuitBreakerRegistry.reset_all()
+    return {"status": "all circuit breakers reset"}

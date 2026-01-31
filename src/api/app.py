@@ -1,4 +1,5 @@
 import time
+import uuid
 from contextlib import asynccontextmanager
 from typing import Any, Dict
 
@@ -13,23 +14,32 @@ from src.api.middleware.error_handler import global_exception_handler
 from src.api.v1.router import api_router
 from src.core.config import settings
 from src.core.exceptions import RAGException
+from src.core.logging import setup_logging, get_logger
+
+logger = get_logger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan context manager for startup/shutdown events."""
+    # Setup logging first
+    setup_logging()
+    
     # Startup
-    print("🚀 Starting RAG Orchestrator API...")
-    print(f"📁 Environment: {settings.ENVIRONMENT}")
-    print(f"🔧 Debug Mode: {settings.DEBUG}")
-    print(f"💾 Vector DB: {settings.VECTOR_DB_TYPE}")
-    print(f"🧠 LLM: {settings.LLM_PROVIDER} - {settings.OPENAI_MODEL}")
+    logger.info(
+        "application_starting",
+        environment=settings.ENVIRONMENT,
+        debug=settings.DEBUG,
+        vector_db=settings.VECTOR_DB_TYPE,
+        llm_provider=settings.LLM_PROVIDER,
+        model=settings.OPENAI_MODEL,
+    )
 
     # Initialize services here if needed
     yield
 
     # Shutdown
-    print("🛑 Shutting down RAG Orchestrator API...")
+    logger.info("application_shutdown")
 
 
 def create_application() -> FastAPI:
@@ -152,24 +162,41 @@ def create_application() -> FastAPI:
 
 async def log_requests(request: Request, call_next):
     """Middleware to log requests."""
+    request_id = str(uuid.uuid4())[:8]
     start_time = time.time()
 
-    response = await call_next(request)
-
-    process_time = (time.time() - start_time) * 1000
-    formatted_time = f"{process_time:.2f}"
-
-    # Log request details (in production, use structured logging)
-    print(
-        f"{request.method} {request.url.path} "
-        f"Status: {response.status_code} "
-        f"Duration: {formatted_time}ms"
+    # Bind request context to logger
+    request_logger = logger.bind(
+        request_id=request_id,
+        method=request.method,
+        path=request.url.path,
     )
 
-    # Add performance header
-    response.headers["X-Process-Time"] = formatted_time
+    request_logger.info("request_started")
 
-    return response
+    try:
+        response = await call_next(request)
+        duration_ms = (time.time() - start_time) * 1000
+
+        request_logger.info(
+            "request_completed",
+            status_code=response.status_code,
+            duration_ms=round(duration_ms, 2),
+        )
+
+        response.headers["X-Request-ID"] = request_id
+        response.headers["X-Process-Time"] = str(round(duration_ms, 2))
+
+        return response
+
+    except Exception as e:
+        duration_ms = (time.time() - start_time) * 1000
+        request_logger.exception(
+            "request_failed",
+            duration_ms=round(duration_ms, 2),
+            error=str(e),
+        )
+        raise
 
 
 # Create application instance

@@ -73,6 +73,8 @@ class TestCircuitBreaker:
                 pass
         
         assert breaker.state == CircuitState.OPEN
+        # The failures counter gets reset when transitioning to OPEN state
+        # So we check total_failures which accumulates all failures
         assert breaker.stats.total_failures == 3
 
     @pytest.mark.asyncio

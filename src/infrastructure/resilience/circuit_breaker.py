@@ -4,7 +4,7 @@ import asyncio
 import time
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, Optional, TypeVar, Generic
+from typing import Any, Callable, Optional, TypeVar
 from functools import wraps
 
 from src.core.logging import get_logger
@@ -70,7 +70,7 @@ class CircuitBreaker:
                 result = await func(*args, **kwargs)
             else:
                 result = func(*args, **kwargs)
-            
+
             await self._record_success()
             return result
 

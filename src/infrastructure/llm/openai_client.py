@@ -117,10 +117,10 @@ class AsyncOpenAIService(LLMService):
 
         try:
             result = await self._circuit_breaker.call(_do_generate)
-            if not stream:
+            if not stream and isinstance(result, str):
                 logger.info(
                     "generate_completed",
-                    response_length=len(result) if result else 0,
+                    response_length=len(result),
                     model=self.model,
                 )
             return result

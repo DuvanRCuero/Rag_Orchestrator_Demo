@@ -59,7 +59,6 @@ class EmbeddingService(EmbeddingServiceInterface):
         if self.use_openai:
             if self._client is None:
                 # Get API key from main config
-                from src.core.config_models import get_config
                 api_key = get_config().llm.api_key
                 self._client = AsyncOpenAI(api_key=api_key)
                 logger.info(

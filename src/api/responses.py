@@ -1,7 +1,7 @@
 """Common response builders for DRY responses."""
 
 from typing import Any, Dict, List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 def success_response(
@@ -13,7 +13,7 @@ def success_response(
     response = {
         "status": "success",
         "message": message,
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
     }
     if data is not None:
         response["data"] = data
@@ -31,7 +31,7 @@ def error_response(
         "status": "error",
         "code": code,
         "message": message,
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
     }
     if details is not None:
         response["details"] = details
@@ -56,5 +56,5 @@ def paginated_response(
             "has_next": page * page_size < total,
             "has_prev": page > 1,
         },
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
     }

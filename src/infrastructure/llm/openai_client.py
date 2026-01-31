@@ -14,7 +14,7 @@ from src.core.config import settings
 from src.core.exceptions import GenerationError
 from src.core.logging import get_logger
 from src.domain.interfaces.llm_service import LLMService
-from src.infrastructure.resilience.registry import CircuitBreakerRegistry
+from src.infrastructure.resilience import CircuitBreaker
 
 logger = get_logger(__name__)
 
@@ -44,6 +44,18 @@ class AsyncOpenAIService(LLMService):
             streaming=True,
         )
         
+        logger.info(
+            "openai_service_initialized",
+            model=self.model,
+            temperature=self.temperature,
+        )
+
+        # Initialize circuit breaker
+        self._circuit_breaker = CircuitBreaker(
+            name="openai",
+            failure_threshold=5,
+            recovery_timeout=30.0,
+        )
         logger.info(
             "openai_service_initialized",
             model=self.model,
@@ -84,15 +96,17 @@ class AsyncOpenAIService(LLMService):
     ) -> Union[str, Any]:
         """Generate completion with retry logic."""
         logger.debug(
-            "openai_generate_start",
+            "generate_started",
             message_count=len(messages),
             model=self.model,
         )
-        
-        try:
-            result = await self._circuit_breaker.call(
-                self._call_openai,
-                messages,
+
+        async def _do_generate():
+            response = await self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                temperature=temperature or self.temperature,
+                max_tokens=max_tokens or self.max_tokens,
                 stream=stream,
                 temperature=temperature,
                 max_tokens=max_tokens,
@@ -106,11 +120,22 @@ class AsyncOpenAIService(LLMService):
                 )
             return result
 
+        try:
+            result = await self._circuit_breaker.call(_do_generate)
+            if not stream:
+                logger.info(
+                    "generate_completed",
+                    response_length=len(result) if result else 0,
+                    model=self.model,
+                )
+            return result
+
         except Exception as e:
             logger.error(
-                "openai_generate_failed",
+                "generate_failed",
                 error=str(e),
-                error_type=type(e).__name__,
+                model=self.model,
+                circuit_state=self._circuit_breaker.state.value,
             )
             raise GenerationError(
                 detail=f"OpenAI generation failed: {str(e)}",

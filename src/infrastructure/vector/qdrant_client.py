@@ -19,7 +19,7 @@ from src.core.logging import get_logger
 from src.core.schemas import DocumentChunk
 from src.domain.vector_store import VectorStore
 from src.domain.retrieval.bm25_scorer import BM25Scorer, BM25Result
-from src.infrastructure.resilience.registry import CircuitBreakerRegistry
+from src.infrastructure.resilience import CircuitBreaker
 
 logger = get_logger(__name__)
 
@@ -36,15 +36,12 @@ class QdrantVectorStore(VectorStore):
         # BM25 support
         self._bm25_scorer = BM25Scorer()
         self._bm25_indexed = False
-        
-        # Circuit breaker for Qdrant
-        self._circuit_breaker = CircuitBreakerRegistry.get_or_create(
+        # Circuit breaker
+        self._circuit_breaker = CircuitBreaker(
             name="qdrant",
-            failure_threshold=3,
+            failure_threshold=5,
             recovery_timeout=30.0,
         )
-        
-        logger.info("qdrant_initialized", collection=self.collection_name)
 
     @property
     def client(self):
@@ -76,7 +73,10 @@ class QdrantVectorStore(VectorStore):
                         distance=Distance.COSINE,
                     ),
                 )
-                logger.info("qdrant_collection_created", collection=self.collection_name)
+                logger.info(
+                    "qdrant_collection_created",
+                    collection=self.collection_name,
+                )
 
                 # Create payload indexes
                 try:
@@ -86,12 +86,21 @@ class QdrantVectorStore(VectorStore):
                         field_schema="keyword",
                     )
                 except Exception as idx_error:
-                    logger.warning("qdrant_index_creation_failed", error=str(idx_error))
+                    logger.warning(
+                        "qdrant_index_creation_failed",
+                        error=str(idx_error),
+                    )
             else:
-                logger.info("qdrant_collection_exists", collection=self.collection_name)
+                logger.info(
+                    "qdrant_collection_exists",
+                    collection=self.collection_name,
+                )
 
         except Exception as e:
-            logger.warning("qdrant_collection_init_failed", error=str(e))
+            logger.warning(
+                "qdrant_collection_init_failed",
+                error=str(e),
+            )
 
     async def create_collection(
             self, collection_name: str, vector_size: int
@@ -106,7 +115,11 @@ class QdrantVectorStore(VectorStore):
             )
             return True
         except Exception as e:
-            logger.error("qdrant_create_collection_failed", error=str(e))
+            logger.error(
+                "qdrant_create_collection_failed",
+                collection=collection_name,
+                error=str(e),
+            )
             return False
 
     async def collection_exists(self, collection_name: str) -> bool:
@@ -161,7 +174,10 @@ class QdrantVectorStore(VectorStore):
             self._bm25_indexed = False
             return True
         except Exception as e:
-            logger.error("qdrant_upsert_failed", error=str(e))
+            logger.error(
+                "qdrant_upsert_failed",
+                error=str(e),
+            )
             return False
 
     async def _do_search(
@@ -171,33 +187,22 @@ class QdrantVectorStore(VectorStore):
             score_threshold: float = 0.0,
             filters: Optional[Dict[str, Any]] = None,
     ) -> List[DocumentChunk]:
-        """Internal search method."""
-        # Build the search request payload for Qdrant REST API
-        search_payload = {
-            "vector": query_embedding,
-            "limit": top_k * 2,
-            "with_payload": True,
-            "with_vector": False,
-            "score_threshold": score_threshold or settings.RETRIEVAL_SCORE_THRESHOLD,
-        }
-
-        # Add filter if provided
-        if filters:
-            filter_conditions = []
-            for key, value in filters.items():
-                filter_conditions.append({
-                    "key": f"metadata.{key}",
-                    "match": {"value": value}
-                })
-            search_payload["filter"] = {"must": filter_conditions}
-
-        # Make direct HTTP POST request to Qdrant REST API
-        response = requests.post(
-            f"{self.http_url}/collections/{self.collection_name}/points/search",
-            json=search_payload,
-            timeout=30
+        """Semantic search using direct HTTP API for v1.7.4 compatibility."""
+        logger.debug(
+            "search_started",
+            top_k=top_k,
+            collection=self.collection_name,
         )
-        response.raise_for_status()
+
+        async def _do_search():
+            # Build the search request payload for Qdrant REST API
+            search_payload = {
+                "vector": query_embedding,
+                "limit": top_k * 2,
+                "with_payload": True,
+                "with_vector": False,
+                "score_threshold": score_threshold or settings.RETRIEVAL_SCORE_THRESHOLD,
+            }
 
         result = response.json()
         search_results = result.get("result", [])
@@ -228,32 +233,31 @@ class QdrantVectorStore(VectorStore):
                 logger.warning("qdrant_result_parse_failed", error=str(chunk_error))
                 continue
 
-        return chunks[:top_k]
+                except Exception as chunk_error:
+                    logger.warning(
+                        "search_result_processing_failed",
+                        error=str(chunk_error),
+                    )
+                    continue
 
-    async def search(
-            self,
-            query_embedding: List[float],
-            top_k: int = 5,
-            score_threshold: float = 0.0,
-            filters: Optional[Dict[str, Any]] = None,
-    ) -> List[DocumentChunk]:
-        """Semantic search using direct HTTP API for v1.7.4 compatibility."""
-        logger.debug("qdrant_search_start", top_k=top_k)
-        
+            return chunks[:top_k]
+
         try:
-            result = await self._circuit_breaker.call(
-                self._do_search,
-                query_embedding,
-                top_k,
-                score_threshold,
-                filters,
+            result = await self._circuit_breaker.call(_do_search)
+            logger.info(
+                "search_completed",
+                results_count=len(result),
+                collection=self.collection_name,
             )
-            
-            logger.info("qdrant_search_complete", results=len(result))
             return result
 
         except requests.exceptions.RequestException as e:
-            logger.error("qdrant_http_request_failed", error=str(e))
+            logger.error(
+                "search_http_request_failed",
+                error=str(e),
+                collection=self.collection_name,
+                circuit_state=self._circuit_breaker.state.value,
+            )
             raise RetrievalError(
                 detail=f"Vector search HTTP request failed: {str(e)}",
                 metadata={
@@ -263,7 +267,12 @@ class QdrantVectorStore(VectorStore):
                 },
             )
         except Exception as e:
-            logger.error("qdrant_search_failed", error=str(e))
+            logger.error(
+                "search_failed",
+                error=str(e),
+                collection=self.collection_name,
+                circuit_state=self._circuit_breaker.state.value,
+            )
             raise RetrievalError(
                 detail=f"Vector search failed: {str(e)}",
                 metadata={
@@ -300,9 +309,15 @@ class QdrantVectorStore(VectorStore):
 
             self._bm25_scorer.index_documents(chunks)
             self._bm25_indexed = True
-            logger.info("qdrant_bm25_indexed", chunk_count=len(chunks))
+            logger.info(
+                "bm25_index_built",
+                chunks_count=len(chunks),
+            )
         except Exception as e:
-            logger.error("qdrant_bm25_index_failed", error=str(e))
+            logger.error(
+                "bm25_index_build_failed",
+                error=str(e),
+            )
 
     async def hybrid_search(
             self,
@@ -423,7 +438,11 @@ class QdrantVectorStore(VectorStore):
             )
             return True
         except Exception as e:
-            logger.error("qdrant_delete_failed", document_id=document_id, error=str(e))
+            logger.error(
+                "qdrant_delete_failed",
+                document_id=document_id,
+                error=str(e),
+            )
             return False
 
     async def get_collection_stats(self) -> Dict[str, Any]:

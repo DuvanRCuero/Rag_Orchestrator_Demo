@@ -207,23 +207,25 @@ async def list_providers():
 
 
 @router.get(
-    "/circuit-breakers",
-    summary="Get circuit breaker status",
-    description="Get the status of all circuit breakers in the system.",
+    "/circuits",
+    summary="Get circuit breakers status",
+    description="Get circuit breaker status for all external services.",
 )
-async def get_circuit_breaker_status():
-    """Get status of all circuit breakers."""
+async def get_circuit_breakers():
+    """Get circuit breaker status for all external services."""
     return {
-        "circuit_breakers": CircuitBreakerRegistry.all_stats(),
+        "circuit_breakers": CircuitBreakerRegistry.get_all_stats(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
 
 @router.post(
-    "/circuit-breakers/reset",
-    summary="Reset circuit breakers",
-    description="Reset all circuit breakers (admin only).",
+    "/circuits/{name}/reset",
+    summary="Reset circuit breaker",
+    description="Reset a circuit breaker to closed state.",
 )
-async def reset_circuit_breakers():
-    """Reset all circuit breakers (admin only)."""
-    CircuitBreakerRegistry.reset_all()
-    return {"status": "all circuit breakers reset"}
+async def reset_circuit_breaker(name: str):
+    """Reset a circuit breaker to closed state."""
+    CircuitBreakerRegistry.reset(name)
+    return {"status": "reset", "circuit": name}
+

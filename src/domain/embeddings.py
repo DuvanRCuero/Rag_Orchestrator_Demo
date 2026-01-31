@@ -57,10 +57,9 @@ class EmbeddingService(EmbeddingServiceInterface):
             if self._client is None:
                 self._client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
                 logger.info(
-                    "embedding_service_initialized",
+                    "openai_embedding_service_initialized",
                     model=self.model_name,
                     dimension=self.dimension,
-                    backend="openai",
                 )
         else:
             if self._model is None:
@@ -72,7 +71,7 @@ class EmbeddingService(EmbeddingServiceInterface):
                     "embedding_service_initialized",
                     model=self.model_name,
                     dimension=self.dimension,
-                    backend="sentence_transformers",
+                    device=self.device,
                 )
 
     @property

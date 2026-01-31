@@ -2,15 +2,15 @@
 
 import threading
 from typing import Dict
-from src.infrastructure.resilience.circuit_breaker import CircuitBreaker
+from src.infrastructure.resilience.circuit_breaker import CircuitBreaker, CircuitState, CircuitStats
 
 
 class CircuitBreakerRegistry:
-    """Registry for managing circuit breakers (thread-safe)."""
-    
+    """Registry for managing circuit breakers."""
+
     _breakers: Dict[str, CircuitBreaker] = {}
     _lock = threading.Lock()
-    
+
     @classmethod
     def get_or_create(
         cls,
@@ -18,12 +18,7 @@ class CircuitBreakerRegistry:
         failure_threshold: int = 5,
         recovery_timeout: float = 30.0,
     ) -> CircuitBreaker:
-        """Get existing or create new circuit breaker (thread-safe)."""
-        if name in cls._breakers:
-            return cls._breakers[name]
-        
         with cls._lock:
-            # Double-check after acquiring lock
             if name not in cls._breakers:
                 cls._breakers[name] = CircuitBreaker(
                     name=name,
@@ -31,19 +26,15 @@ class CircuitBreakerRegistry:
                     recovery_timeout=recovery_timeout,
                 )
             return cls._breakers[name]
-    
+
     @classmethod
-    def get(cls, name: str) -> CircuitBreaker:
-        """Get a circuit breaker by name."""
-        return cls._breakers.get(name)
-    
+    def get_all_stats(cls) -> list:
+        with cls._lock:
+            return [breaker.get_stats() for breaker in cls._breakers.values()]
+
     @classmethod
-    def all_stats(cls) -> dict:
-        """Get stats for all circuit breakers."""
-        return {name: cb.stats for name, cb in cls._breakers.items()}
-    
-    @classmethod
-    def reset_all(cls) -> None:
-        """Reset all circuit breakers."""
-        for cb in cls._breakers.values():
-            cb._reset()
+    def reset(cls, name: str):
+        with cls._lock:
+            if name in cls._breakers:
+                cls._breakers[name]._state = CircuitState.CLOSED
+                cls._breakers[name]._stats = CircuitStats()

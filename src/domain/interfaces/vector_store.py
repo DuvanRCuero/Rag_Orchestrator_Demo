@@ -1,4 +1,4 @@
-"""Base vector store interface for the domain layer."""
+"""Segregated vector store interfaces."""
 
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional
@@ -6,22 +6,8 @@ from typing import Any, Dict, List, Optional
 from src.core.schemas import DocumentChunk
 
 
-class VectorStore(ABC):
-    """Abstract base class for vector store implementations."""
-
-    @abstractmethod
-    async def create_collection(
-        self, collection_name: str, vector_size: int
-    ) -> bool:
-        """Create a new collection."""
-        pass
-
-    @abstractmethod
-    async def upsert_chunks(
-        self, chunks: List[DocumentChunk], embeddings: List[List[float]]
-    ) -> bool:
-        """Insert or update document chunks with their embeddings."""
-        pass
+class VectorReader(ABC):
+    """Interface for reading from vector store."""
 
     @abstractmethod
     async def search(
@@ -46,9 +32,40 @@ class VectorStore(ABC):
         """Perform hybrid search combining semantic and keyword search."""
         pass
 
+
+class VectorWriter(ABC):
+    """Interface for writing to vector store."""
+
+    @abstractmethod
+    async def upsert_chunks(
+        self,
+        chunks: List[DocumentChunk],
+        embeddings: List[List[float]] = None,
+    ) -> bool:
+        """Insert or update document chunks with their embeddings."""
+        pass
+
     @abstractmethod
     async def delete_by_document_id(self, document_id: str) -> bool:
         """Delete all chunks for a given document."""
+        pass
+
+
+class VectorAdmin(ABC):
+    """Interface for vector store administration."""
+
+    @abstractmethod
+    async def create_collection(
+        self,
+        collection_name: str,
+        vector_size: int,
+    ) -> bool:
+        """Create a new collection."""
+        pass
+
+    @abstractmethod
+    async def collection_exists(self, collection_name: str) -> bool:
+        """Check if collection exists."""
         pass
 
     @abstractmethod
@@ -56,7 +73,7 @@ class VectorStore(ABC):
         """Get collection statistics."""
         pass
 
-    @abstractmethod
-    async def collection_exists(self, collection_name: str) -> bool:
-        """Check if collection exists."""
-        pass
+
+class VectorStore(VectorReader, VectorWriter, VectorAdmin):
+    """Full vector store interface combining all capabilities."""
+    pass

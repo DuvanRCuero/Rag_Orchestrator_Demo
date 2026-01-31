@@ -17,7 +17,7 @@ from src.core.config import settings
 from src.core.exceptions import RetrievalError
 from src.core.logging import get_logger
 from src.core.schemas import DocumentChunk
-from src.domain.vector_store import VectorStore
+from src.domain.interfaces.vector_store import VectorStore
 from src.domain.retrieval.bm25_scorer import BM25Scorer, BM25Result
 from src.infrastructure.resilience import circuit_breaker_registry, CircuitBreakerConfig
 

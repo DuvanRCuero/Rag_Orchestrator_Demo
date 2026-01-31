@@ -232,3 +232,20 @@ async def reset_circuit_breaker(name: str):
     cb.reset()
     return {"status": "reset", "circuit": name}
 
+
+@router.get("/chunking-strategies")
+async def list_chunking_strategies():
+    """List available chunking strategies."""
+    from src.domain.chunking import ChunkingStrategyFactory
+    
+    strategies = []
+    for strategy_class in ChunkingStrategyFactory.available_strategies():
+        instance = strategy_class()
+        strategies.append({
+            "name": instance.name,
+            "default_chunk_size": instance.config.chunk_size,
+            "default_overlap": instance.config.chunk_overlap,
+        })
+    
+    return {"strategies": strategies}
+

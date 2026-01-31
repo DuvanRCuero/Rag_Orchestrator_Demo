@@ -13,52 +13,82 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter, MarkdownHea
 
 from src.core.config import settings
 from src.core.exceptions import IngestionError
+from src.core.logging import get_logger
 from src.core.schemas import Document, DocumentChunk, DocumentType
+from src.domain.chunking import (
+    ChunkingStrategy,
+    ChunkingStrategyFactory,
+    ChunkingConfig,
+)
 
-
-@dataclass
-class ChunkingStrategy:
-    """Configuration for text chunking strategy."""
-
-    name: str
-    chunk_size: int
-    chunk_overlap: int
-    separators: List[str]
-    keep_separator: bool
+logger = get_logger(__name__)
 
 
 class AdvancedDocumentProcessor:
-    """Production-grade document processor with multiple chunking strategies."""
+    """Document processor using Strategy Pattern for chunking."""
 
-    STRATEGIES = {
-        "recursive_character": ChunkingStrategy(
-            name="recursive_character",
-            chunk_size=1000,
-            chunk_overlap=200,
-            separators=["\n\n", "\n", " ", ""],
-            keep_separator=True,
-        ),
-        "semantic": ChunkingStrategy(
-            name="semantic",
-            chunk_size=500,
-            chunk_overlap=100,
-            separators=["\n\n", "\n", ". ", "! ", "? ", " ", ""],
-            keep_separator=False,
-        ),
-        "markdown_aware": ChunkingStrategy(
-            name="markdown_aware",
-            chunk_size=800,
-            chunk_overlap=150,
-            separators=["# ", "## ", "### ", "\n\n", "\n", " "],
-            keep_separator=True,
-        ),
-    }
-
-    def __init__(self, strategy_name: str = None):
-        self.strategy_name = strategy_name or settings.TEXT_SPLITTER
-        self.strategy = self.STRATEGIES.get(
-            self.strategy_name, self.STRATEGIES["recursive_character"]
+    def __init__(
+        self,
+        strategy: ChunkingStrategy = None,
+        strategy_name: str = None,
+        config: ChunkingConfig = None,
+    ):
+        if strategy:
+            self._strategy = strategy
+        else:
+            name = strategy_name or settings.TEXT_SPLITTER
+            self._strategy = ChunkingStrategyFactory.create(name, config)
+        
+        logger.info(
+            "document_processor_initialized",
+            strategy=self._strategy.name,
         )
+
+    @property
+    def strategy(self) -> ChunkingStrategy:
+        return self._strategy
+
+    @strategy.setter
+    def strategy(self, value: ChunkingStrategy) -> None:
+        self._strategy = value
+        logger.info("chunking_strategy_changed", strategy=value.name)
+
+    @property
+    def strategy_name(self) -> str:
+        """Backward compatibility property."""
+        return self._strategy.name
+
+    def create_chunks(
+        self,
+        text: str,
+        metadata: Dict[str, Any] = None,
+    ) -> List[DocumentChunk]:
+        """Create chunks using current strategy."""
+        logger.debug(
+            "chunking_started",
+            strategy=self._strategy.name,
+            text_length=len(text),
+        )
+        
+        chunks = self._strategy.chunk(text, metadata)
+        
+        logger.info(
+            "chunking_completed",
+            strategy=self._strategy.name,
+            chunks_created=len(chunks),
+        )
+        
+        return chunks
+
+    def create_chunks_auto(
+        self,
+        text: str,
+        metadata: Dict[str, Any] = None,
+        doc_type: str = "txt",
+    ) -> List[DocumentChunk]:
+        """Auto-select strategy based on document type."""
+        strategy = ChunkingStrategyFactory.get_for_document_type(doc_type)
+        return strategy.chunk(text, metadata)
 
     def load_document(
         self, file_path: str, doc_type: DocumentType
@@ -91,130 +121,19 @@ class AdvancedDocumentProcessor:
         self, text: str, metadata: Dict[str, Any]
     ) -> List[DocumentChunk]:
         """Create chunks with semantic boundaries and hierarchy awareness."""
-
-        # Detect document type for specialized splitting
+        # Use auto-detection for backward compatibility
+        doc_type = "txt"
         if metadata.get("type") == DocumentType.MD:
-            chunks = self._split_markdown_with_hierarchy(text, metadata)
+            doc_type = "md"
         elif self._contains_code(text):
-            chunks = self._split_code_aware(text, metadata)
-        else:
-            chunks = self._split_recursive(text, metadata)
-
+            doc_type = "py"
+        
+        # Use the auto strategy selector
+        chunks = self.create_chunks_auto(text, metadata, doc_type)
+        
         # Post-process chunks for quality
         chunks = self._post_process_chunks(chunks)
-
-        return chunks
-
-    def _split_recursive(
-        self, text: str, metadata: Dict[str, Any]
-    ) -> List[DocumentChunk]:
-        """Recursive character splitting with semantic boundaries."""
-        splitter = RecursiveCharacterTextSplitter(
-            chunk_size=self.strategy.chunk_size,
-            chunk_overlap=self.strategy.chunk_overlap,
-            separators=self.strategy.separators,
-            keep_separator=self.strategy.keep_separator,
-            length_function=len,
-            is_separator_regex=False,
-        )
-
-        raw_chunks = splitter.split_text(text)
-        return self._chunks_to_models(raw_chunks, metadata)
-
-    def _split_markdown_with_hierarchy(
-        self, text: str, metadata: Dict[str, Any]
-    ) -> List[DocumentChunk]:
-        """Markdown-aware splitting preserving hierarchy."""
-        headers_to_split_on = [
-            ("#", "Header 1"),
-            ("##", "Header 2"),
-            ("###", "Header 3"),
-        ]
-
-        markdown_splitter = MarkdownHeaderTextSplitter(
-            headers_to_split_on=headers_to_split_on, strip_headers=False
-        )
-
-        raw_chunks = markdown_splitter.split_text(text)
-
-        # Convert to our models
-        chunks = []
-        for idx, chunk in enumerate(raw_chunks):
-            chunk_metadata = {**metadata, **chunk.metadata}
-            chunk_id = f"{metadata.get('document_id', 'doc')}_{idx}"
-
-            chunks.append(
-                DocumentChunk(
-                    id=chunk_id,
-                    content=chunk.page_content,
-                    metadata=chunk_metadata,
-                    document_id=metadata.get("document_id"),
-                    chunk_index=idx,
-                )
-            )
-
-        return chunks
-
-    def _split_code_aware(
-        self, text: str, metadata: Dict[str, Any]
-    ) -> List[DocumentChunk]:
-        """Splitting that preserves code blocks and imports."""
-        # Preserve code blocks
-        code_blocks = re.findall(r"```[\s\S]*?```", text)
-
-        # Split on natural boundaries but keep code blocks together
-        sections = []
-        current_section = []
-        lines = text.split("\n")
-
-        for line in lines:
-            if line.strip().startswith("```") or any(
-                code in line for code in code_blocks
-            ):
-                # Code block - keep together
-                current_section.append(line)
-            elif len(" ".join(current_section)) > self.strategy.chunk_size:
-                sections.append("\n".join(current_section))
-                current_section = [line]
-            else:
-                current_section.append(line)
-
-        if current_section:
-            sections.append("\n".join(current_section))
-
-        return self._chunks_to_models(sections, metadata)
-
-    def _chunks_to_models(
-        self, raw_chunks: List[str], metadata: Dict[str, Any]
-    ) -> List[DocumentChunk]:
-        """Convert raw text chunks to DocumentChunk models."""
-        chunks = []
-        for idx, content in enumerate(raw_chunks):
-            if not content.strip():
-                continue
-
-            chunk_id = hashlib.md5(
-                f"{metadata.get('document_id')}_{idx}".encode()
-            ).hexdigest()[:16]
-
-            chunk_metadata = {
-                **metadata,
-                "chunk_size": len(content),
-                "chunk_strategy": self.strategy_name,
-                "has_code": self._contains_code(content),
-                "word_count": len(content.split()),
-            }
-
-            chunks.append(
-                DocumentChunk(
-                    id=chunk_id,
-                    content=content,
-                    metadata=chunk_metadata,
-                    document_id=metadata.get("document_id"),
-                    chunk_index=idx,
-                )
-            )
-
+        
         return chunks
 
     def _contains_code(self, text: str) -> bool:

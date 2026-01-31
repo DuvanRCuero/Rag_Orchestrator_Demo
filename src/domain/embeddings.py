@@ -1,5 +1,6 @@
 import asyncio
 from typing import Any, Dict, List, Optional
+from collections import namedtuple
 
 import backoff
 import numpy as np
@@ -15,6 +16,9 @@ from src.infrastructure.cache.interfaces import CacheInterface
 from src.infrastructure.cache.key_builder import CacheKeyBuilder
 
 logger = get_logger(__name__)
+
+# Named tuple for cache processing
+CacheEntry = namedtuple('CacheEntry', ['idx', 'text', 'key'])
 
 
 class EmbeddingService(EmbeddingServiceInterface):
@@ -133,13 +137,13 @@ class EmbeddingService(EmbeddingServiceInterface):
                         error=str(e)
                     )
             
-            uncached_texts.append((idx, text, cache_key))
+            uncached_texts.append(CacheEntry(idx, text, cache_key))
 
         # Process uncached texts
         if uncached_texts:
-            uncached_indices = [idx for idx, _, _ in uncached_texts]
-            uncached_texts_only = [text for _, text, _ in uncached_texts]
-            cache_keys = [key for _, _, key in uncached_texts]
+            uncached_indices = [entry.idx for entry in uncached_texts]
+            uncached_texts_only = [entry.text for entry in uncached_texts]
+            cache_keys = [entry.key for entry in uncached_texts]
 
             if self.use_openai:
                 batch_embeddings = await self._embed_openai_batch(uncached_texts_only)
@@ -155,13 +159,13 @@ class EmbeddingService(EmbeddingServiceInterface):
 
             # Fill new embeddings and update caches
             cache_items = {}
-            for i, (orig_idx, text, cache_key) in enumerate(uncached_texts):
+            for i, entry in enumerate(uncached_texts):
                 embedding = batch_embeddings[i]
                 # Update L1 cache
-                self._local_cache[cache_key] = embedding
-                result_embeddings[orig_idx] = embedding
+                self._local_cache[entry.key] = embedding
+                result_embeddings[entry.idx] = embedding
                 # Prepare for L2 cache batch update
-                cache_items[cache_key] = embedding
+                cache_items[entry.key] = embedding
 
             # Batch update L2 cache (Redis)
             if self.cache and cache_items:

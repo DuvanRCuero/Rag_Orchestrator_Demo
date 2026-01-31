@@ -126,7 +126,7 @@ class RedisCache(CacheInterface):
             # Use pipeline for batch operations
             async with pool.pipeline(transaction=True) as pipe:
                 for key, value in items.items():
-                    await pipe.setex(key, ttl, json.dumps(value))
+                    pipe.setex(key, ttl, json.dumps(value))
                 await pipe.execute()
             return True
         except Exception as e:

@@ -202,13 +202,16 @@ class TestRedisCache:
         mock_pipeline = AsyncMock()
         mock_pipeline.__aenter__ = AsyncMock(return_value=mock_pipeline)
         mock_pipeline.__aexit__ = AsyncMock(return_value=None)
-        mock_pipeline.setex = AsyncMock()
+        mock_pipeline.setex = MagicMock()  # Changed from AsyncMock - no await
         mock_pipeline.execute = AsyncMock(return_value=[True, True])
         mock_redis.pipeline.return_value = mock_pipeline
         
         items = {"key1": "value1", "key2": "value2"}
         result = await cache.mset(items)
         assert result is True
+        
+        # Verify setex was called synchronously (not awaited)
+        assert mock_pipeline.setex.call_count == 2
 
     @pytest.mark.asyncio
     async def test_stats(self, cache, mock_redis):

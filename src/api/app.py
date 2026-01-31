@@ -11,6 +11,7 @@ from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse
 
 from src.api.middleware.error_handler import global_exception_handler
+from src.api.middleware.logging_middleware import LoggingMiddleware
 from src.api.v1.router import api_router
 from src.core.config import settings
 from src.core.exceptions import RAGException
@@ -65,8 +66,8 @@ def create_application() -> FastAPI:
         allow_headers=["*"],
     )
 
-    # Add middleware
-    app.middleware("http")(log_requests)
+    # Add logging middleware
+    app.add_middleware(LoggingMiddleware)
 
     # Add exception handlers
     app.add_exception_handler(RAGException, global_exception_handler)

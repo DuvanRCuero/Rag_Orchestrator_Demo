@@ -28,6 +28,13 @@ class AsyncOpenAIService(LLMService):
         self.temperature = settings.OPENAI_TEMPERATURE
         self.max_tokens = settings.OPENAI_MAX_TOKENS
 
+        # Circuit breaker for OpenAI
+        self._circuit_breaker = CircuitBreakerRegistry.get_or_create(
+            name="openai",
+            failure_threshold=5,
+            recovery_timeout=60.0,
+        )
+
         # Initialize LangChain LLM for LCEL chains
         self.langchain_llm = ChatOpenAI(
             model=self.model,
@@ -35,6 +42,12 @@ class AsyncOpenAIService(LLMService):
             max_tokens=self.max_tokens,
             api_key=settings.OPENAI_API_KEY,
             streaming=True,
+        )
+        
+        logger.info(
+            "openai_service_initialized",
+            model=self.model,
+            temperature=self.temperature,
         )
 
         # Initialize circuit breaker
@@ -52,6 +65,27 @@ class AsyncOpenAIService(LLMService):
     @backoff.on_exception(
         backoff.expo, (APIError, RateLimitError), max_tries=3, max_time=30
     )
+    async def _call_openai(
+        self,
+        messages: List[Dict[str, str]],
+        stream: bool = False,
+        **kwargs,
+    ) -> Union[str, Any]:
+        """Internal method to call OpenAI with retry."""
+        response = await self.client.chat.completions.create(
+            model=self.model,
+            messages=messages,
+            temperature=kwargs.get("temperature", self.temperature),
+            max_tokens=kwargs.get("max_tokens", self.max_tokens),
+            stream=stream,
+            **kwargs,
+        )
+        
+        if stream:
+            return response
+        else:
+            return response.choices[0].message.content
+
     async def generate(
         self,
         messages: List[Dict[str, str]],
@@ -74,13 +108,17 @@ class AsyncOpenAIService(LLMService):
                 temperature=temperature or self.temperature,
                 max_tokens=max_tokens or self.max_tokens,
                 stream=stream,
+                temperature=temperature,
+                max_tokens=max_tokens,
                 **kwargs,
             )
-
-            if stream:
-                return response
-            else:
-                return response.choices[0].message.content
+            
+            if not stream:
+                logger.info(
+                    "openai_generate_success",
+                    response_length=len(result),
+                )
+            return result
 
         try:
             result = await self._circuit_breaker.call(_do_generate)
@@ -150,6 +188,7 @@ class AsyncOpenAIService(LLMService):
             json_match = re.search(r"\{.*\}", response, re.DOTALL)
             if json_match:
                 return json.loads(json_match.group())
+            logger.warning("openai_json_parse_failed", response_preview=response[:100])
             return {"response": response, "metadata": {}}
 
     async def stream_generation(
@@ -158,6 +197,8 @@ class AsyncOpenAIService(LLMService):
         callback_handler: Optional[AsyncIteratorCallbackHandler] = None,
     ):
         """Stream generation token by token."""
+        logger.debug("openai_stream_start", message_count=len(messages))
+        
         try:
             if callback_handler:
                 # Use LangChain streaming
@@ -195,8 +236,11 @@ class AsyncOpenAIService(LLMService):
                 async for chunk in response:
                     if chunk.choices[0].delta.content:
                         yield chunk.choices[0].delta.content
+                
+                logger.debug("openai_stream_complete")
 
         except Exception as e:
+            logger.error("openai_stream_failed", error=str(e))
             raise GenerationError(
                 detail=f"Streaming generation failed: {str(e)}",
                 metadata={"model": self.model, "streaming": True},

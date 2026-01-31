@@ -15,8 +15,11 @@ from src.application.chains.prompts import (CONFIDENCE_PROMPT, HYDE_PROMPT,
                                             VERIFICATION_PROMPT)
 from src.core.config import settings
 from src.core.exceptions import GenerationError, RetrievalError
+from src.core.logging import get_logger
 from src.core.schemas import DocumentChunk, QueryRequest, QueryResponse
 from src.domain.interfaces import LLMService, EmbeddingServiceInterface, VectorStore
+
+logger = get_logger(__name__)
 
 
 @dataclass
@@ -118,7 +121,7 @@ class AdvancedRAGChain:
             try:
                 query_variations.extend(await self._generate_query_variations(query))
             except Exception as e:
-                print(f"Multi-query generation failed: {e}")
+                logger.warning("multi_query_generation_failed", error=str(e))
 
         # Strategy 2: HyDE (Hypothetical Document Embeddings)
         hyde_embedding = None
@@ -129,7 +132,7 @@ class AdvancedRAGChain:
                     [hypothetical_doc]
                 )[0]
             except Exception as e:
-                print(f"HyDE generation failed: {e}")
+                logger.warning("hyde_generation_failed", error=str(e))
 
         # Retrieve for each query variation
         all_chunks = []
@@ -338,7 +341,7 @@ class AdvancedRAGChain:
             return self._parse_verification_report(verification_text)
 
         except Exception as e:
-            print(f"Verification failed: {e}")
+            logger.warning("verification_failed", error=str(e))
             return {"issues": [], "verified_claims": []}
 
     def _parse_verification_report(self, report_text: str) -> Dict[str, Any]:
@@ -419,7 +422,7 @@ Generate a corrected answer:"""
             return self._parse_reflection(reflection_text)
 
         except Exception as e:
-            print(f"Self-reflection failed: {e}")
+            logger.warning("self_reflection_failed", error=str(e))
             return {"critique": "", "suggestions": []}
 
     def _parse_reflection(self, reflection_text: str) -> Dict[str, Any]:
@@ -462,7 +465,7 @@ Generate a corrected answer:"""
             return 0.7  # Default confidence
 
         except Exception as e:
-            print(f"Confidence scoring failed: {e}")
+            logger.warning("confidence_scoring_failed", error=str(e))
             return 0.7  # Default confidence
 
     def _format_context(self, chunks: List[DocumentChunk]) -> str:

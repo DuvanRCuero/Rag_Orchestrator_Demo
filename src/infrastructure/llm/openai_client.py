@@ -12,7 +12,11 @@ from openai import APIError, AsyncOpenAI, RateLimitError
 
 from src.core.config import settings
 from src.core.exceptions import GenerationError
+from src.core.logging import get_logger
 from src.domain.interfaces.llm_service import LLMService
+from src.infrastructure.resilience import CircuitBreaker
+
+logger = get_logger(__name__)
 
 
 class AsyncOpenAIService(LLMService):
@@ -33,6 +37,18 @@ class AsyncOpenAIService(LLMService):
             streaming=True,
         )
 
+        # Initialize circuit breaker
+        self._circuit_breaker = CircuitBreaker(
+            name="openai",
+            failure_threshold=5,
+            recovery_timeout=30.0,
+        )
+        logger.info(
+            "openai_service_initialized",
+            model=self.model,
+            temperature=self.temperature,
+        )
+
     @backoff.on_exception(
         backoff.expo, (APIError, RateLimitError), max_tries=3, max_time=30
     )
@@ -45,7 +61,13 @@ class AsyncOpenAIService(LLMService):
         **kwargs,
     ) -> Union[str, Any]:
         """Generate completion with retry logic."""
-        try:
+        logger.debug(
+            "generate_started",
+            message_count=len(messages),
+            model=self.model,
+        )
+
+        async def _do_generate():
             response = await self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,
@@ -60,7 +82,23 @@ class AsyncOpenAIService(LLMService):
             else:
                 return response.choices[0].message.content
 
+        try:
+            result = await self._circuit_breaker.call(_do_generate)
+            if not stream:
+                logger.info(
+                    "generate_completed",
+                    response_length=len(result) if result else 0,
+                    model=self.model,
+                )
+            return result
+
         except Exception as e:
+            logger.error(
+                "generate_failed",
+                error=str(e),
+                model=self.model,
+                circuit_state=self._circuit_breaker.state.value,
+            )
             raise GenerationError(
                 detail=f"OpenAI generation failed: {str(e)}",
                 metadata={

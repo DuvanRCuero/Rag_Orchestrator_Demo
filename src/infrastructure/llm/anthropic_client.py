@@ -5,20 +5,23 @@ from typing import Any, AsyncIterator, Dict, List, Optional
 
 from src.domain.interfaces.llm_service import LLMService
 from src.core.config import settings
+from src.core.config_models import LLMConfig, get_config
 from src.core.exceptions import GenerationError
 
 
 class AnthropicService(LLMService):
 
-    def __init__(self):
+    def __init__(self, config: LLMConfig = None):
+        self.config = config or get_config().llm
+        
         try:
             from anthropic import AsyncAnthropic
-            self.client = AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
+            self.client = AsyncAnthropic(api_key=self.config.api_key)
         except ImportError:
             raise ImportError("anthropic package required. Install with: pip install anthropic")
         
-        self.model = getattr(settings, 'ANTHROPIC_MODEL', 'claude-3-sonnet-20240229')
-        self.max_tokens = getattr(settings, 'ANTHROPIC_MAX_TOKENS', 1000)
+        self.model = self.config.model
+        self.max_tokens = self.config.max_tokens
         self._langchain_llm = None
 
     def _convert_messages(self, messages: List[Dict[str, str]]) -> tuple:

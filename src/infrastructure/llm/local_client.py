@@ -7,14 +7,17 @@ import httpx
 
 from src.domain.interfaces.llm_service import LLMService
 from src.core.config import settings
+from src.core.config_models import LLMConfig, get_config
 from src.core.exceptions import GenerationError
 
 
 class LocalLLMService(LLMService):
 
-    def __init__(self):
-        self.base_url = getattr(settings, 'OLLAMA_BASE_URL', 'http://localhost:11434')
-        self.model = getattr(settings, 'LOCAL_MODEL', 'llama2')
+    def __init__(self, config: LLMConfig = None):
+        self.config = config or get_config().llm
+        
+        self.base_url = settings.OLLAMA_BASE_URL
+        self.model = self.config.model
         self._langchain_llm = None
 
     async def generate(

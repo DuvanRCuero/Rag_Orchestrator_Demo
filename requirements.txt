@@ -19,6 +19,7 @@ tiktoken==0.12.0
 uvicorn==0.40.0
 rank-bm25>=0.2.2
 structlog>=24.1.0
+redis>=5.0.0  # For production caching
 
 # Optional LLM providers
 anthropic>=0.18.0  # For Anthropic Claude

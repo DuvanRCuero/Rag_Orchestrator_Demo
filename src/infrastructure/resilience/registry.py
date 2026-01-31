@@ -1,13 +1,15 @@
 """Circuit Breaker Registry for managing multiple breakers."""
 
+import threading
 from typing import Dict
 from src.infrastructure.resilience.circuit_breaker import CircuitBreaker
 
 
 class CircuitBreakerRegistry:
-    """Registry for managing circuit breakers."""
+    """Registry for managing circuit breakers (thread-safe)."""
     
     _breakers: Dict[str, CircuitBreaker] = {}
+    _lock = threading.Lock()
     
     @classmethod
     def get_or_create(
@@ -16,14 +18,19 @@ class CircuitBreakerRegistry:
         failure_threshold: int = 5,
         recovery_timeout: float = 30.0,
     ) -> CircuitBreaker:
-        """Get existing or create new circuit breaker."""
-        if name not in cls._breakers:
-            cls._breakers[name] = CircuitBreaker(
-                name=name,
-                failure_threshold=failure_threshold,
-                recovery_timeout=recovery_timeout,
-            )
-        return cls._breakers[name]
+        """Get existing or create new circuit breaker (thread-safe)."""
+        if name in cls._breakers:
+            return cls._breakers[name]
+        
+        with cls._lock:
+            # Double-check after acquiring lock
+            if name not in cls._breakers:
+                cls._breakers[name] = CircuitBreaker(
+                    name=name,
+                    failure_threshold=failure_threshold,
+                    recovery_timeout=recovery_timeout,
+                )
+            return cls._breakers[name]
     
     @classmethod
     def get(cls, name: str) -> CircuitBreaker:

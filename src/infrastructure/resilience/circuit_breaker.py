@@ -35,9 +35,7 @@ class CircuitBreaker:
     success_count: int = field(default=0)
     last_failure_time: Optional[float] = field(default=None)
     half_open_calls: int = field(default=0)
-    
-    def __post_init__(self):
-        self._lock = asyncio.Lock()
+    _lock: asyncio.Lock = field(default_factory=asyncio.Lock, init=False, repr=False)
 
     async def call(self, func: Callable[..., T], *args: Any, **kwargs: Any) -> T:
         """Execute function with circuit breaker protection."""
@@ -45,13 +43,14 @@ class CircuitBreaker:
             await self._check_state()
             
             if self.state == CircuitState.OPEN:
+                retry_after = self._time_until_retry()
                 logger.warning(
                     "circuit_breaker_open",
                     breaker=self.name,
-                    retry_after=self._time_until_retry(),
+                    retry_after=retry_after,
                 )
                 raise CircuitBreakerOpenError(
-                    f"Circuit breaker '{self.name}' is open. Retry after {self._time_until_retry():.1f}s"
+                    f"Circuit breaker '{self.name}' is open. Retry after {retry_after:.1f}s"
                 )
 
         try:

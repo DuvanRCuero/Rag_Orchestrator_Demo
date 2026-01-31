@@ -1,5 +1,5 @@
 import platform
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict
 
 import psutil
@@ -22,7 +22,7 @@ async def health_check():
     try:
         health_status = {
             "status": "healthy",
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "service": "RAG Orchestrator API",
             "version": "1.0.0",
         }
@@ -86,7 +86,7 @@ async def get_metrics():
     """Get system metrics."""
     try:
         metrics = {
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "system": {
                 "cpu": {
                     "percent": psutil.cpu_percent(interval=0.1),

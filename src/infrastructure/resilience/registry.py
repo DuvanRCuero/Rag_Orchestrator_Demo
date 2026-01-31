@@ -1,40 +1,42 @@
-"""Circuit Breaker Registry for managing multiple breakers."""
+"""Circuit Breaker Registry for managing multiple circuit breakers."""
 
-import threading
-from typing import Dict
-from src.infrastructure.resilience.circuit_breaker import CircuitBreaker, CircuitState, CircuitStats
+from typing import Dict, Optional
+
+from src.infrastructure.resilience.circuit_breaker import (
+    CircuitBreaker,
+    CircuitBreakerConfig,
+)
 
 
 class CircuitBreakerRegistry:
     """Registry for managing circuit breakers."""
 
-    _breakers: Dict[str, CircuitBreaker] = {}
-    _lock = threading.Lock()
+    def __init__(self):
+        self._breakers: Dict[str, CircuitBreaker] = {}
 
-    @classmethod
     def get_or_create(
-        cls,
+        self,
         name: str,
-        failure_threshold: int = 5,
-        recovery_timeout: float = 30.0,
+        config: Optional[CircuitBreakerConfig] = None,
     ) -> CircuitBreaker:
-        with cls._lock:
-            if name not in cls._breakers:
-                cls._breakers[name] = CircuitBreaker(
-                    name=name,
-                    failure_threshold=failure_threshold,
-                    recovery_timeout=recovery_timeout,
-                )
-            return cls._breakers[name]
+        """Get existing or create new circuit breaker."""
+        if name not in self._breakers:
+            self._breakers[name] = CircuitBreaker(name, config)
+        return self._breakers[name]
 
-    @classmethod
-    def get_all_stats(cls) -> list:
-        with cls._lock:
-            return [breaker.get_stats() for breaker in cls._breakers.values()]
+    def get(self, name: str) -> Optional[CircuitBreaker]:
+        """Get circuit breaker by name."""
+        return self._breakers.get(name)
 
-    @classmethod
-    def reset(cls, name: str):
-        with cls._lock:
-            if name in cls._breakers:
-                cls._breakers[name]._state = CircuitState.CLOSED
-                cls._breakers[name]._stats = CircuitStats()
+    def get_all_status(self) -> list:
+        """Get status of all circuit breakers."""
+        return [cb.get_status() for cb in self._breakers.values()]
+
+    def reset_all(self) -> None:
+        """Reset all circuit breakers."""
+        for cb in self._breakers.values():
+            cb.reset()
+
+
+# Global registry
+circuit_breaker_registry = CircuitBreakerRegistry()

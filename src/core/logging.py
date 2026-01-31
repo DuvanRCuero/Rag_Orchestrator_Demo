@@ -1,93 +1,58 @@
-"""Structured logging configuration."""
+"""Structured logging configuration using structlog."""
 
 import logging
 import sys
-from typing import Any, Dict, Optional
-from datetime import datetime, timezone
-import json
+from typing import Optional
+
+import structlog
+from structlog.types import Processor
 
 from src.core.config import settings
 
 
-class JSONFormatter(logging.Formatter):
-    """JSON formatter for structured logging."""
+def setup_logging(log_level: Optional[str] = None) -> None:
+    """Configure structured logging for the application."""
+    
+    level = log_level or ("DEBUG" if settings.DEBUG else "INFO")
+    
+    # Configure standard library logging
+    logging.basicConfig(
+        format="%(message)s",
+        stream=sys.stdout,
+        level=getattr(logging, level),
+    )
 
-    def format(self, record: logging.LogRecord) -> str:
-        log_data = {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "level": record.levelname,
-            "logger": record.name,
-            "message": record.getMessage(),
-            "module": record.module,
-            "function": record.funcName,
-            "line": record.lineno,
-        }
+    # Shared processors
+    shared_processors: list[Processor] = [
+        structlog.contextvars.merge_contextvars,
+        structlog.stdlib.filter_by_level,
+        structlog.stdlib.add_logger_name,
+        structlog.stdlib.add_log_level,
+        structlog.stdlib.PositionalArgumentsFormatter(),
+        structlog.processors.TimeStamper(fmt="iso"),
+        structlog.processors.StackInfoRenderer(),
+        structlog.processors.UnicodeDecoder(),
+    ]
 
-        # Add extra fields
-        if hasattr(record, "extra_data"):
-            log_data.update(record.extra_data)
-
-        # Add exception info if present
-        if record.exc_info:
-            log_data["exception"] = self.formatException(record.exc_info)
-
-        return json.dumps(log_data)
-
-
-class StructuredLogger:
-    """Wrapper for structured logging with context."""
-
-    def __init__(self, name: str):
-        self.logger = logging.getLogger(name)
-        self._context: Dict[str, Any] = {}
-
-    def bind(self, **kwargs) -> "StructuredLogger":
-        """Add context that will be included in all log messages."""
-        new_logger = StructuredLogger(self.logger.name)
-        new_logger.logger = self.logger
-        new_logger._context = {**self._context, **kwargs}
-        return new_logger
-
-    def _log(self, level: int, message: str, **kwargs):
-        extra_data = {**self._context, **kwargs}
-        self.logger.log(level, message, extra={"extra_data": extra_data})
-
-    def debug(self, message: str, **kwargs):
-        self._log(logging.DEBUG, message, **kwargs)
-
-    def info(self, message: str, **kwargs):
-        self._log(logging.INFO, message, **kwargs)
-
-    def warning(self, message: str, **kwargs):
-        self._log(logging.WARNING, message, **kwargs)
-
-    def error(self, message: str, **kwargs):
-        self._log(logging.ERROR, message, **kwargs)
-
-    def exception(self, message: str, **kwargs):
-        kwargs['exc_info'] = True
-        self._log(logging.ERROR, message, **kwargs)
-
-
-def setup_logging():
-    """Configure logging for the application."""
-    log_level = logging.DEBUG if settings.DEBUG else logging.INFO
-
-    # Create handler
-    handler = logging.StreamHandler(sys.stdout)
-
-    # Use JSON formatter in production, readable format in development
-    if settings.ENVIRONMENT == "production":
-        handler.setFormatter(JSONFormatter())
+    if settings.DEBUG:
+        # Development: pretty console output
+        processors = shared_processors + [
+            structlog.dev.ConsoleRenderer(colors=True)
+        ]
     else:
-        handler.setFormatter(logging.Formatter(
-            "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s"
-        ))
+        # Production: JSON output
+        processors = shared_processors + [
+            structlog.processors.format_exc_info,
+            structlog.processors.JSONRenderer()
+        ]
 
-    # Configure root logger
-    root_logger = logging.getLogger()
-    root_logger.setLevel(log_level)
-    root_logger.addHandler(handler)
+    structlog.configure(
+        processors=processors,
+        wrapper_class=structlog.stdlib.BoundLogger,
+        context_class=dict,
+        logger_factory=structlog.stdlib.LoggerFactory(),
+        cache_logger_on_first_use=True,
+    )
 
     # Reduce noise from third-party libraries
     logging.getLogger("httpx").setLevel(logging.WARNING)
@@ -96,6 +61,21 @@ def setup_logging():
     logging.getLogger("qdrant_client").setLevel(logging.WARNING)
 
 
-def get_logger(name: str) -> StructuredLogger:
+def get_logger(name: str) -> structlog.stdlib.BoundLogger:
     """Get a structured logger instance."""
-    return StructuredLogger(name)
+    return structlog.get_logger(name)
+
+
+# Request context helpers
+def bind_request_context(request_id: str, **kwargs) -> None:
+    """Bind request context to all subsequent log messages."""
+    structlog.contextvars.clear_contextvars()
+    structlog.contextvars.bind_contextvars(
+        request_id=request_id,
+        **kwargs
+    )
+
+
+def clear_request_context() -> None:
+    """Clear request context."""
+    structlog.contextvars.clear_contextvars()

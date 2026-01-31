@@ -19,7 +19,7 @@ from src.core.logging import get_logger
 from src.core.schemas import DocumentChunk
 from src.domain.vector_store import VectorStore
 from src.domain.retrieval.bm25_scorer import BM25Scorer, BM25Result
-from src.infrastructure.resilience import CircuitBreaker
+from src.infrastructure.resilience import circuit_breaker_registry, CircuitBreakerConfig
 
 logger = get_logger(__name__)
 
@@ -37,11 +37,14 @@ class QdrantVectorStore(VectorStore):
         self._bm25_scorer = BM25Scorer()
         self._bm25_indexed = False
         # Circuit breaker
-        self._circuit_breaker = CircuitBreaker(
-            name="qdrant",
-            failure_threshold=5,
-            recovery_timeout=30.0,
+        self._circuit_breaker = circuit_breaker_registry.get_or_create(
+            "qdrant",
+            CircuitBreakerConfig(
+                failure_threshold=3,
+                recovery_timeout=15.0,
+            )
         )
+        logger.info("qdrant_store_initialized", collection=self.collection_name)
 
     @property
     def client(self):

@@ -5,9 +5,10 @@ import logging
 import sys
 import pytest
 
-from src.core.logging import StructuredLogger, JSONFormatter, get_logger, setup_logging
+from src.core.logging import get_logger, setup_logging
 from src.infrastructure.resilience.circuit_breaker import (
     CircuitBreaker,
+    CircuitBreakerConfig,
     CircuitState,
     CircuitOpenError,
 )
@@ -18,35 +19,15 @@ class TestStructuredLogging:
 
     def test_get_logger(self):
         """Test getting a logger instance."""
+        import structlog
         logger = get_logger("test")
-        assert isinstance(logger, StructuredLogger)
-        assert logger.logger.name == "test"
+        assert isinstance(logger, structlog.stdlib.BoundLogger)
 
-    def test_logger_bind(self):
-        """Test logger context binding."""
+    def test_setup_logging(self):
+        """Test logging setup."""
+        setup_logging("INFO")
         logger = get_logger("test")
-        bound_logger = logger.bind(request_id="123", user="test")
-        
-        assert bound_logger._context["request_id"] == "123"
-        assert bound_logger._context["user"] == "test"
-
-    def test_json_formatter(self):
-        """Test JSON formatter."""
-        formatter = JSONFormatter()
-        record = logging.LogRecord(
-            name="test",
-            level=logging.INFO,
-            pathname="test.py",
-            lineno=1,
-            msg="test message",
-            args=(),
-            exc_info=None,
-        )
-        
-        formatted = formatter.format(record)
-        assert "test message" in formatted
-        assert "INFO" in formatted
-        assert "timestamp" in formatted
+        assert logger is not None
 
 
 class TestCircuitBreaker:
@@ -55,29 +36,27 @@ class TestCircuitBreaker:
     @pytest.mark.asyncio
     async def test_circuit_breaker_closed_state(self):
         """Test circuit breaker in closed state."""
-        breaker = CircuitBreaker("test", failure_threshold=3)
+        breaker = CircuitBreaker("test", CircuitBreakerConfig(failure_threshold=3))
         
         assert breaker.state == CircuitState.CLOSED
-        assert breaker.is_closed
-        assert not breaker.is_open
 
     @pytest.mark.asyncio
     async def test_circuit_breaker_success(self):
         """Test successful calls through circuit breaker."""
-        breaker = CircuitBreaker("test", failure_threshold=3)
+        breaker = CircuitBreaker("test", CircuitBreakerConfig(failure_threshold=3))
         
         async def success_func():
             return "success"
         
         result = await breaker.call(success_func)
         assert result == "success"
-        assert breaker._stats.successes == 1
-        assert breaker._stats.failures == 0
+        assert breaker.stats.successes == 1
+        assert breaker.stats.failures == 0
 
     @pytest.mark.asyncio
     async def test_circuit_breaker_opens_on_failures(self):
         """Test circuit breaker opens after threshold failures."""
-        breaker = CircuitBreaker("test", failure_threshold=3)
+        breaker = CircuitBreaker("test", CircuitBreakerConfig(failure_threshold=3))
         
         async def failing_func():
             raise ValueError("test error")
@@ -90,13 +69,12 @@ class TestCircuitBreaker:
                 pass
         
         assert breaker.state == CircuitState.OPEN
-        assert breaker.is_open
-        assert breaker._stats.failures == 3
+        assert breaker.stats.total_failures == 3
 
     @pytest.mark.asyncio
     async def test_circuit_breaker_rejects_when_open(self):
         """Test circuit breaker rejects calls when open."""
-        breaker = CircuitBreaker("test", failure_threshold=2)
+        breaker = CircuitBreaker("test", CircuitBreakerConfig(failure_threshold=2))
         
         async def failing_func():
             raise ValueError("test error")
@@ -117,8 +95,10 @@ class TestCircuitBreaker:
         """Test circuit breaker transitions to half-open."""
         breaker = CircuitBreaker(
             "test",
-            failure_threshold=2,
-            recovery_timeout=0.1,  # Short timeout for testing
+            CircuitBreakerConfig(
+                failure_threshold=2,
+                recovery_timeout=0.1,  # Short timeout for testing
+            )
         )
         
         async def failing_func():
@@ -136,8 +116,11 @@ class TestCircuitBreaker:
         # Wait for recovery timeout
         await asyncio.sleep(0.2)
         
-        # Check state should transition to half-open
-        await breaker._check_state()
+        # Try to execute - should transition to half-open
+        async def success_func():
+            return "success"
+        
+        await breaker.call(success_func)
         assert breaker.state == CircuitState.HALF_OPEN
 
     @pytest.mark.asyncio
@@ -145,9 +128,12 @@ class TestCircuitBreaker:
         """Test circuit breaker recovers after successful calls."""
         breaker = CircuitBreaker(
             "test",
-            failure_threshold=2,
-            recovery_timeout=0.1,
-            half_open_max_calls=2,
+            CircuitBreakerConfig(
+                failure_threshold=2,
+                recovery_timeout=0.1,
+                half_open_max_calls=2,
+                success_threshold=2,
+            )
         )
         
         async def success_func():
@@ -167,8 +153,6 @@ class TestCircuitBreaker:
         
         # Wait for recovery timeout
         await asyncio.sleep(0.2)
-        await breaker._check_state()
-        assert breaker.state == CircuitState.HALF_OPEN
         
         # Make successful calls to close circuit
         for _ in range(2):
@@ -176,16 +160,16 @@ class TestCircuitBreaker:
         
         assert breaker.state == CircuitState.CLOSED
 
-    def test_circuit_breaker_get_stats(self):
-        """Test getting circuit breaker statistics."""
-        breaker = CircuitBreaker("test", failure_threshold=5)
+    def test_circuit_breaker_get_status(self):
+        """Test getting circuit breaker status."""
+        breaker = CircuitBreaker("test", CircuitBreakerConfig(failure_threshold=5))
         
-        stats = breaker.get_stats()
-        assert stats["name"] == "test"
-        assert stats["state"] == "closed"
-        assert stats["failures"] == 0
-        assert stats["successes"] == 0
-        assert stats["failure_threshold"] == 5
+        status = breaker.get_status()
+        assert status["name"] == "test"
+        assert status["state"] == "closed"
+        assert status["stats"]["failures"] == 0
+        assert status["stats"]["successes"] == 0
+        assert status["config"]["failure_threshold"] == 5
 
 
 if __name__ == "__main__":

@@ -1,0 +1,7 @@
+Defaulting to user installation because normal site-packages is not writeable
+Collecting structlog
+  Downloading structlog-25.5.0-py3-none-any.whl.metadata (9.5 kB)
+Downloading structlog-25.5.0-py3-none-any.whl (72 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 72.5/72.5 kB 24.2 MB/s eta 0:00:00
+Installing collected packages: structlog
+Successfully installed structlog-25.5.0

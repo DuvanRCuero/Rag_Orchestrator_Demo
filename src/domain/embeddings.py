@@ -8,7 +8,10 @@ from sentence_transformers import SentenceTransformer
 
 from src.core.config import settings
 from src.core.exceptions import IngestionError
+from src.core.logging import get_logger
 from src.domain.interfaces.embedding_service import EmbeddingServiceInterface
+
+logger = get_logger(__name__)
 
 
 class EmbeddingService(EmbeddingServiceInterface):
@@ -53,8 +56,11 @@ class EmbeddingService(EmbeddingServiceInterface):
         if self.use_openai:
             if self._client is None:
                 self._client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
-                print(
-                    f"Initialized OpenAI embedding service: {self.model_name}, dim={self.dimension}"
+                logger.info(
+                    "embedding_service_initialized",
+                    model=self.model_name,
+                    dimension=self.dimension,
+                    backend="openai",
                 )
         else:
             if self._model is None:
@@ -62,8 +68,11 @@ class EmbeddingService(EmbeddingServiceInterface):
                     self.model_name, device=self.device
                 )
                 self.dimension = self._model.get_sentence_embedding_dimension()
-                print(
-                    f"Initialized embedding service: {self.model_name}, dim={self.dimension}"
+                logger.info(
+                    "embedding_service_initialized",
+                    model=self.model_name,
+                    dimension=self.dimension,
+                    backend="sentence_transformers",
                 )
 
     @property

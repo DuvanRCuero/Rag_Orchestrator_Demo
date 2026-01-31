@@ -10,6 +10,7 @@ A question-answering system built with Clean Architecture principles, featuring 
 |---------|----------------|
 | **Multi-Strategy Retrieval** | Multi-Query Expansion, HyDE, Cross-Encoder Reranking |
 | **Hallucination Mitigation** | Chain-of-Verification, Self-Reflection, Confidence Scoring |
+| **Redis Caching Layer** | Persistent embedding & query result cache with TTL management |
 | **Clean Architecture** | 3-layer separation (Domain/Application/Infrastructure) |
 | **Production Ready** | Docker Compose, async everywhere, 85%+ test coverage |
 
@@ -163,6 +164,7 @@ RAG-Orchestrator/
 
 - [Project Summary](PROJECT_SUMMARY.md) - Technical deep dive & design decisions
 - [Architecture Guide](docs/architecture.md)
+- [Cache Implementation](docs/CACHE_IMPLEMENTATION.md) - Redis caching layer with TTL management
 - [Hallucination Mitigation](docs/hallucination.md)
 - [Performance Optimization](docs/performance.md)
 

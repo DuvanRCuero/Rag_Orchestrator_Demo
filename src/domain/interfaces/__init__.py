@@ -8,6 +8,7 @@ from src.domain.interfaces.vector_store import (
     VectorWriter,
     VectorAdmin,
 )
+from src.domain.interfaces.cache_service import CacheService
 
 __all__ = [
     "LLMService",
@@ -16,4 +17,5 @@ __all__ = [
     "VectorReader",
     "VectorWriter",
     "VectorAdmin",
+    "CacheService",
 ]

@@ -58,6 +58,14 @@ class Settings(BaseSettings):
     MEMORY_TYPE: str = "buffer_window"  # Options: buffer, window, summary
     MEMORY_WINDOW_SIZE: int = 10
 
+    # Cache Configuration
+    CACHE_TYPE: str = "memory"  # Options: redis, memory
+    REDIS_URL: str = "redis://localhost:6379/0"
+    CACHE_EMBEDDING_TTL: int = 604800  # 7 days in seconds
+    CACHE_QUERY_TTL: int = 3600  # 1 hour in seconds
+    CACHE_SESSION_TTL: int = 1800  # 30 minutes in seconds
+    CACHE_MAX_CONNECTIONS: int = 10
+
     # Redis (if you have it in your .env, add it here)
     # redis_url: Optional[str] = None
 

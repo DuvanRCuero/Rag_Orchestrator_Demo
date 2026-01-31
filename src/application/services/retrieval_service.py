@@ -5,7 +5,7 @@ import hashlib
 from dataclasses import dataclass, field
 from typing import List, Optional
 
-from src.domain.interfaces import EmbeddingServiceInterface, VectorStore
+from src.domain.interfaces import EmbeddingServiceInterface, VectorReader
 from src.core.config import settings
 from src.core.schemas import DocumentChunk
 
@@ -23,7 +23,7 @@ class RetrievalService:
 
     def __init__(
         self,
-        vector_store: VectorStore,
+        vector_store: VectorReader,
         embedding_service: EmbeddingServiceInterface,
     ):
         self.vector_store = vector_store

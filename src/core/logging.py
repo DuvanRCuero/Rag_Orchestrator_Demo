@@ -99,3 +99,10 @@ def setup_logging():
 def get_logger(name: str) -> StructuredLogger:
     """Get a structured logger instance."""
     return StructuredLogger(name)
+
+
+def bind_context():
+    """Bind context for structured logging."""
+    logger = get_logger("contextual_logger")
+    return logger
+
